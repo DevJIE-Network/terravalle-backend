@@ -21,6 +21,11 @@ const userSchema = new mongoose.Schema(
       required: true,
       select: false,
     },
+    isActive: {
+      type: Boolean,
+      default: true,
+      index: true,
+    },
   },
   {
     timestamps: true,
@@ -31,7 +36,7 @@ const userSchema = new mongoose.Schema(
         return result;
       },
     },
-  }
+  },
 );
 
 module.exports = mongoose.model('User', userSchema);
