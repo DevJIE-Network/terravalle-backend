@@ -17,4 +17,17 @@ const registerSchema = z.strictObject({
     ),
 });
 
-module.exports = { registerSchema };
+const loginSchema = z.strictObject({
+  email: z.string()
+    .trim()
+    .toLowerCase()
+    .pipe(z.email({ error: 'El correo electrónico no es válido.' })),
+  password: z.string()
+    .min(1, 'La contraseña es obligatoria.')
+    .refine(
+      (password) => Buffer.byteLength(password, 'utf8') <= 72,
+      'La contraseña no puede superar los 72 bytes en UTF-8.'
+    ),
+});
+
+module.exports = { registerSchema, loginSchema };

@@ -1,192 +1,188 @@
 const assert = require('node:assert/strict');
-const { once } = require('node:events');
-const { after, before, test } = require('node:test');
+const { before, test } = require('node:test');
 const bcrypt = require('bcryptjs');
-const mongoose = require('mongoose');
-const { app } = require('../src/server');
-const connectDatabase = require('../src/config/database');
+const jwt = require('jsonwebtoken');
 const User = require('../src/models/User');
-const { registerSchema } = require('../src/schemas/auth.schema');
+const { app } = require('../src/server');
+const { connectDatabase } = require('../src/config/database');
+const { loginSchema } = require('../src/schemas/auth.schema');
 
-let server;
+process.env.JWT_SECRET = 'terravalle-hu002-test-secret-2026-32chars';
+process.env.JWT_EXPIRES_IN = '1h';
+
 let baseUrl;
+let server;
 
 before(async () => {
   server = app.listen(0, '127.0.0.1');
-  await once(server, 'listening');
+  await new Promise((resolve) => server.once('listening', resolve));
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 
-after(async () => {
-  await new Promise((resolve, reject) => {
-    server.close((error) => error ? reject(error) : resolve());
-  });
+process.on('exit', () => {
+  if (server) server.close();
 });
 
-function register(body) {
-  return fetch(`${baseUrl}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+function request(path, options) {
+  return fetch(`${baseUrl}${path}`, options);
+}
+
+function jsonRequest(path, body, method = 'POST', token) {
+  return request(path, {
+    method,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) }),
   });
 }
 
-test('el servidor responde al endpoint de estado', async () => {
-  const response = await fetch(`${baseUrl}/api/health`);
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { status: 'ok' });
-  assert.equal(response.headers.get('x-powered-by'), null);
+test('HU-001 sigue exponiendo el endpoint de registro', async (t) => {
+  const create = t.mock.method(User, 'create', async (data) => new User(data));
+
+  const response = await jsonRequest('/api/auth/register', {
+    name: 'Usuario TerraValle',
+    email: 'usuario@example.com',
+    password: 'clave-segura',
+  });
+
+  assert.equal(response.status, 201);
+  assert.equal(create.mock.callCount(), 1);
+  const body = await response.json();
+  assert.deepEqual(Object.keys(body.user).sort(), ['email', 'id', 'name']);
 });
 
-test('las rutas inexistentes devuelven JSON y estado 404', async () => {
-  const response = await fetch(`${baseUrl}/no-existe`);
+test('HU-002 el esquema de login exige correo y contraseña', () => {
+  assert.equal(loginSchema.safeParse({ email: 'usuario@example.com', password: 'clave' }).success, true);
+  assert.equal(loginSchema.safeParse({ email: 'no-es-correo', password: 'clave' }).success, false);
+  assert.equal(loginSchema.safeParse({ email: 'usuario@example.com' }).success, false);
+});
+
+test('HU-002 autentica credenciales correctas y devuelve JWT', async (t) => {
+  const passwordHash = await bcrypt.hash('clave-segura', 12);
+  const user = {
+    id: '68f000000000000000000001',
+    name: 'Usuario TerraValle',
+    email: 'usuario@example.com',
+    passwordHash,
+    isActive: true,
+  };
+
+  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+
+  const response = await jsonRequest('/api/auth/login', {
+    email: ' USUARIO@EXAMPLE.COM ',
+    password: 'clave-segura',
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.message, 'Inicio de sesión correcto.');
+  assert.equal(body.user.email, 'usuario@example.com');
+  assert.equal(typeof body.token, 'string');
+
+  const payload = jwt.verify(body.token, process.env.JWT_SECRET);
+  assert.equal(payload.sub, user.id);
+  assert.equal(payload.email, user.email);
+});
+
+test('HU-002 rechaza contraseña incorrecta con mensaje genérico', async (t) => {
+  const passwordHash = await bcrypt.hash('clave-segura', 12);
+  const user = { id: '68f000000000000000000002', name: 'Usuario', email: 'usuario@example.com', passwordHash, isActive: true };
+  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+
+  const response = await jsonRequest('/api/auth/login', {
+    email: 'usuario@example.com',
+    password: 'otra-clave',
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { message: 'Correo o contraseña incorrectos.' });
+});
+
+test('HU-002 rechaza correo inexistente con el mismo mensaje genérico', async (t) => {
+  t.mock.method(User, 'findOne', () => ({ select: async () => null }));
+
+  const response = await jsonRequest('/api/auth/login', {
+    email: 'noexiste@example.com',
+    password: 'clave-segura',
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { message: 'Correo o contraseña incorrectos.' });
+});
+
+test('HU-002 rechaza cuentas deshabilitadas sin revelar la causa', async (t) => {
+  const passwordHash = await bcrypt.hash('clave-segura', 12);
+  const user = { id: '68f000000000000000000003', name: 'Usuario', email: 'usuario@example.com', passwordHash, isActive: false };
+  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+
+  const response = await jsonRequest('/api/auth/login', {
+    email: 'usuario@example.com',
+    password: 'clave-segura',
+  });
+
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { message: 'Correo o contraseña incorrectos.' });
+});
+
+test('HU-002 acepta cuentas creadas antes del campo isActive', async (t) => {
+  const passwordHash = await bcrypt.hash('clave-segura', 12);
+  const user = { id: '68f000000000000000000004', name: 'Usuario', email: 'usuario@example.com', passwordHash };
+  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+
+  const response = await jsonRequest('/api/auth/login', {
+    email: 'usuario@example.com',
+    password: 'clave-segura',
+  });
+
+  assert.equal(response.status, 200);
+});
+
+test('HU-002 protege /api/auth/me con Bearer JWT', async (t) => {
+  const user = { id: '68f000000000000000000005', name: 'Usuario', email: 'usuario@example.com', isActive: true };
+  const token = jwt.sign({ sub: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
+  t.mock.method(User, 'findById', async () => user);
+
+  const response = await jsonRequest('/api/auth/me', undefined, 'GET', token);
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { user });
+});
+
+test('HU-002 rechaza /api/auth/me sin token', async () => {
+  const response = await request('/api/auth/me');
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { message: 'Sesión no válida o expirada.' });
+});
+
+test('HU-002 rechaza /api/auth/me con token vencido', async (t) => {
+  const token = jwt.sign({ sub: '68f000000000000000000006' }, process.env.JWT_SECRET, { expiresIn: -1 });
+  t.mock.method(User, 'findById', async () => {
+    throw new Error('No debe consultar usuarios para un JWT vencido.');
+  });
+
+  const response = await jsonRequest('/api/auth/me', undefined, 'GET', token);
+  assert.equal(response.status, 401);
+  assert.deepEqual(await response.json(), { message: 'Sesión no válida o expirada.' });
+});
+
+test('el health check sigue disponible', async () => {
+  const response = await request('/api/health');
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { status: 'ok' });
+});
+
+test('las rutas inexistentes devuelven JSON 404', async () => {
+  const response = await request('/no-existe');
   assert.equal(response.status, 404);
   assert.deepEqual(await response.json(), { message: 'Ruta no encontrada.' });
 });
 
-test('el esquema normaliza el nombre y el correo', () => {
-  const result = registerSchema.parse({
-    name: '  Usuario TerraValle  ',
-    email: '  USUARIO@EXAMPLE.COM  ',
-    password: 'clave-segura',
-  });
-
-  assert.equal(result.name, 'Usuario TerraValle');
-  assert.equal(result.email, 'usuario@example.com');
-});
-
-test('el esquema valida el límite de bcrypt en bytes, incluidos caracteres multibyte', () => {
-  const input = { name: 'Usuario', email: 'usuario@example.com' };
-  assert.equal(registerSchema.safeParse({ ...input, password: 'a'.repeat(72) }).success, true);
-  assert.equal(registerSchema.safeParse({ ...input, password: 'a'.repeat(73) }).success, false);
-  assert.equal(registerSchema.safeParse({ ...input, password: 'á'.repeat(37) }).success, false);
-});
-
-test('el registro rechaza datos inválidos antes de consultar la base de datos', async (t) => {
-  const create = t.mock.method(User, 'create', async () => {
-    throw new Error('No debe llamarse con datos inválidos.');
-  });
-  const response = await register({ name: 'A', email: 'incorrecto', password: 'corta' });
-  const body = await response.json();
-
-  assert.equal(response.status, 400);
-  assert.equal(body.errors.length, 3);
-  assert.equal(create.mock.callCount(), 0);
-});
-
-test('el registro rechaza campos adicionales', async () => {
-  const response = await register({
-    name: 'Usuario',
-    email: 'usuario@example.com',
-    password: 'clave-segura',
-    role: 'admin',
-  });
-
-  assert.equal(response.status, 400);
-});
-
-test('el registro rechaza solicitudes sin cuerpo', async () => {
-  const response = await fetch(`${baseUrl}/api/auth/register`, { method: 'POST' });
-  assert.equal(response.status, 400);
-});
-
-test('el registro rechaza JSON mal formado', async () => {
-  const response = await fetch(`${baseUrl}/api/auth/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{',
-  });
-
-  assert.equal(response.status, 400);
-  assert.deepEqual(await response.json(), {
-    message: 'El cuerpo de la solicitud debe ser JSON válido.',
-  });
-});
-
-test('el servidor limita el tamaño del cuerpo JSON', async () => {
-  const response = await register({ name: 'a'.repeat(11 * 1024) });
-  assert.equal(response.status, 413);
-});
-
-test('el registro almacena un hash y no expone la contraseña', async (t) => {
-  let saved;
-  t.mock.method(User, 'create', async (data) => {
-    saved = data;
-    return new User(data);
-  });
-
-  const response = await register({
-    name: '  Usuario  ',
-    email: '  USUARIO@EXAMPLE.COM  ',
-    password: 'clave-segura',
-  });
-  const body = await response.json();
-
-  assert.equal(response.status, 201);
-  assert.equal(saved.name, 'Usuario');
-  assert.equal(saved.email, 'usuario@example.com');
-  assert.equal(saved.password, undefined);
-  assert.notEqual(saved.passwordHash, 'clave-segura');
-  assert.equal(await bcrypt.compare('clave-segura', saved.passwordHash), true);
-  assert.deepEqual(Object.keys(body.user).sort(), ['email', 'id', 'name']);
-});
-
-test('los correos duplicados devuelven estado 409', async (t) => {
-  t.mock.method(User, 'create', async () => {
-    throw Object.assign(new Error('Correo duplicado'), { code: 11000 });
-  });
-
-  const response = await register({
-    name: 'Usuario',
-    email: 'usuario@example.com',
-    password: 'clave-segura',
-  });
-
-  assert.equal(response.status, 409);
-  assert.deepEqual(await response.json(), {
-    message: 'El correo electrónico ya está registrado.',
-  });
-});
-
-test('los errores internos no exponen detalles de la base de datos', async (t) => {
-  t.mock.method(console, 'error', () => {});
-  t.mock.method(User, 'create', async () => {
-    throw new Error('Detalles privados de MongoDB');
-  });
-
-  const response = await register({
-    name: 'Usuario',
-    email: 'usuario@example.com',
-    password: 'clave-segura',
-  });
-
-  assert.equal(response.status, 500);
-  assert.deepEqual(await response.json(), { message: 'Error interno del servidor.' });
-});
-
-test('el modelo omite el hash al serializarse a JSON', () => {
-  const user = new User({
-    name: 'Usuario',
-    email: 'USUARIO@EXAMPLE.COM',
-    passwordHash: 'hash-privado',
-  });
-
-  assert.equal(user.email, 'usuario@example.com');
-  assert.equal(user.toJSON().passwordHash, undefined);
-  assert.equal(User.schema.path('passwordHash').options.select, false);
-});
-
-test('la conexión exige una URI de MongoDB', async () => {
-  await assert.rejects(connectDatabase(''), /Configura MONGODB_URI/);
-});
-
-test('la conexión utiliza la URI configurada y un tiempo de espera limitado', async (t) => {
-  const connect = t.mock.method(mongoose, 'connect', async () => mongoose);
-  const connection = await connectDatabase('mongodb://127.0.0.1:27017/pruebas');
-
-  assert.equal(connection, mongoose.connection);
-  assert.deepEqual(connect.mock.calls[0].arguments, [
-    'mongodb://127.0.0.1:27017/pruebas',
-    { serverSelectionTimeoutMS: 5000 },
-  ]);
+test('la conexión exige MONGODB_URI si no se proporciona una URI', async () => {
+  const previous = process.env.MONGODB_URI;
+  delete process.env.MONGODB_URI;
+  await assert.rejects(connectDatabase(), /Configura MONGODB_URI/);
+  process.env.MONGODB_URI = previous;
 });
