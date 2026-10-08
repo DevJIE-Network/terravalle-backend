@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { before, test } = require('node:test');
+const { after, before, test } = require('node:test');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const User = require('../src/models/User');
@@ -19,8 +19,10 @@ before(async () => {
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
 
-process.on('exit', () => {
-  if (server) server.close();
+after(() => {
+  if (!server) return;
+  server.closeAllConnections();
+  return new Promise((resolve) => server.close(resolve));
 });
 
 function request(path, options) {
@@ -148,7 +150,9 @@ test('HU-002 protege /api/auth/me con Bearer JWT', async (t) => {
   const response = await jsonRequest('/api/auth/me', undefined, 'GET', token);
 
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { user });
+  assert.deepEqual(await response.json(), {
+    user: { id: user.id, name: user.name, email: user.email },
+  });
 });
 
 test('HU-002 rechaza /api/auth/me sin token', async () => {
@@ -184,5 +188,5 @@ test('la conexión exige MONGODB_URI si no se proporciona una URI', async () => 
   const previous = process.env.MONGODB_URI;
   delete process.env.MONGODB_URI;
   await assert.rejects(connectDatabase(), /Configura MONGODB_URI/);
-  process.env.MONGODB_URI = previous;
+  if (previous !== undefined) process.env.MONGODB_URI = previous;
 });

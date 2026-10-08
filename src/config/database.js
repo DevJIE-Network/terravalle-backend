@@ -1,7 +1,7 @@
 const mongoose = require('mongoose');
 
 async function connectDatabase(mongoUri = process.env.MONGODB_URI) {
-  const databaseName = process.env.MONGODB_DBNAME || 'terravalley';
+  const databaseName = process.env.MONGODB_DBNAME || 'terravalle';
 
   if (!mongoUri) {
     throw new Error('Configura MONGODB_URI en el archivo .env.');

@@ -102,6 +102,29 @@ Envía un cuerpo JSON con los siguientes campos:
 
 Respuestas: `201` al crear el usuario, `400` si los datos o el JSON son inválidos, `409` si el correo ya existe y `413` si el cuerpo supera 10 KB. El registro no crea una sesión ni emite un token de acceso.
 
+### Perfil del usuario (HU-003)
+
+Todas las rutas requieren el encabezado `Authorization: Bearer <token>` obtenido en el inicio de sesión.
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/api/users/me` | Devuelve `id`, `name` y `email` del usuario autenticado. |
+| `PATCH` | `/api/users/me` | Actualiza `name` y/o `email` del usuario autenticado. |
+| `GET` / `PATCH` | `/api/users/:id` | Igual que `/me` si `:id` es la cuenta propia; `403` si es otra cuenta. |
+
+Cuerpo de ejemplo para `PATCH`:
+
+```json
+{
+  "name": "Nuevo nombre",
+  "email": "nuevo@example.com"
+}
+```
+
+- Solo se aceptan `name` y `email`; cualquier otro campo se rechaza con `400`.
+- `email` se normaliza a minúsculas y debe seguir siendo único (`409` si ya lo usa otra cuenta).
+- Respuestas: `200` con el perfil vigente, `400` por datos inválidos, `401` sin sesión válida, `403` al intentar acceder a otra cuenta y `409` por correo duplicado.
+
 ## Pruebas
 
 ```bash
