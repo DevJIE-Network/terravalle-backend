@@ -1,4 +1,4 @@
-const User = require('../models/User');
+const userRepository = require('../repositories/user.repository');
 const { updateProfileSchema } = require('../schemas/user.schema');
 
 const EMAIL_IN_USE_MESSAGE = 'El correo electrónico ya está registrado.';
@@ -43,18 +43,14 @@ async function updateProfile(req, res, next) {
 
   try {
     if (changes.email !== undefined) {
-      const emailTaken = await User.exists({ email: changes.email, _id: { $ne: userId } });
+      const emailTaken = await userRepository.isEmailTakenByOther(changes.email, userId);
 
       if (emailTaken) {
         return res.status(409).json({ message: EMAIL_IN_USE_MESSAGE });
       }
     }
 
-    const user = await User.findByIdAndUpdate(
-      userId,
-      { $set: changes },
-      { returnDocument: 'after', runValidators: true },
-    );
+    const user = await userRepository.updateProfile(userId, changes);
 
     if (!user) {
       return res.status(401).json({ message: 'Sesión no válida o expirada.' });
@@ -65,7 +61,8 @@ async function updateProfile(req, res, next) {
       user: toProfile(user),
     });
   } catch (error) {
-    if (error.code === 11000) {
+    // 23505 = violación de índice único en PostgreSQL (correo repetido).
+    if (error.code === '23505') {
       return res.status(409).json({ message: EMAIL_IN_USE_MESSAGE });
     }
 
