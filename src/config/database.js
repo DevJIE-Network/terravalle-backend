@@ -1,24 +1,53 @@
-const mongoose = require('mongoose');
+const { Pool } = require('pg');
 
-async function connectDatabase(mongoUri = process.env.MONGODB_URI) {
-  const databaseName = process.env.MONGODB_DBNAME || 'terravalle';
+let pool = null;
 
-  if (!mongoUri) {
-    throw new Error('Configura MONGODB_URI en el archivo .env.');
+function getPool() {
+  if (!pool) {
+    throw new Error('La base de datos no está conectada. Llama a connectDatabase() primero.');
   }
 
-  await mongoose.connect(mongoUri, {
-    dbName: databaseName,
-    serverSelectionTimeoutMS: 5000,
+  return pool;
+}
+
+async function connectDatabase(connectionString = process.env.DATABASE_URL) {
+  if (!connectionString) {
+    throw new Error('Configura DATABASE_URL en el archivo .env.');
+  }
+
+  const newPool = new Pool({
+    connectionString,
+    max: 5,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
   });
 
-  console.log(
-    `MongoDB conectado correctamente: ${mongoose.connection.name}`,
-  );
+  try {
+    await newPool.query('SELECT 1');
+  } catch (error) {
+    await newPool.end();
+    throw error;
+  }
 
-  return mongoose.connection;
+  pool = newPool;
+  console.log('PostgreSQL conectado correctamente.');
+
+  return pool;
+}
+
+function query(text, params) {
+  return getPool().query(text, params);
+}
+
+async function closeDatabase() {
+  if (pool) {
+    await pool.end();
+    pool = null;
+  }
 }
 
 module.exports = {
   connectDatabase,
+  closeDatabase,
+  query,
 };
