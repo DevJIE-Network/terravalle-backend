@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const { after, before, test } = require('node:test');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const User = require('../src/models/User');
+const userRepository = require('../src/repositories/user.repository');
 const { app } = require('../src/server');
 const { connectDatabase } = require('../src/config/database');
 const { loginSchema } = require('../src/schemas/auth.schema');
@@ -41,7 +41,12 @@ function jsonRequest(path, body, method = 'POST', token) {
 }
 
 test('HU-001 sigue exponiendo el endpoint de registro', async (t) => {
-  const create = t.mock.method(User, 'create', async (data) => new User(data));
+  const create = t.mock.method(userRepository, 'create', async (data) => ({
+    id: '1',
+    name: data.name,
+    email: data.email,
+    isActive: true,
+  }));
 
   const response = await jsonRequest('/api/auth/register', {
     name: 'Usuario TerraValle',
@@ -64,14 +69,14 @@ test('HU-002 el esquema de login exige correo y contraseña', () => {
 test('HU-002 autentica credenciales correctas y devuelve JWT', async (t) => {
   const passwordHash = await bcrypt.hash('clave-segura', 12);
   const user = {
-    id: '68f000000000000000000001',
+    id: '1',
     name: 'Usuario TerraValle',
     email: 'usuario@example.com',
     passwordHash,
     isActive: true,
   };
 
-  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+  t.mock.method(userRepository, 'findByEmailWithPassword', async () => user);
 
   const response = await jsonRequest('/api/auth/login', {
     email: ' USUARIO@EXAMPLE.COM ',
@@ -91,8 +96,8 @@ test('HU-002 autentica credenciales correctas y devuelve JWT', async (t) => {
 
 test('HU-002 rechaza contraseña incorrecta con mensaje genérico', async (t) => {
   const passwordHash = await bcrypt.hash('clave-segura', 12);
-  const user = { id: '68f000000000000000000002', name: 'Usuario', email: 'usuario@example.com', passwordHash, isActive: true };
-  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+  const user = { id: '2', name: 'Usuario', email: 'usuario@example.com', passwordHash, isActive: true };
+  t.mock.method(userRepository, 'findByEmailWithPassword', async () => user);
 
   const response = await jsonRequest('/api/auth/login', {
     email: 'usuario@example.com',
@@ -104,7 +109,7 @@ test('HU-002 rechaza contraseña incorrecta con mensaje genérico', async (t) =>
 });
 
 test('HU-002 rechaza correo inexistente con el mismo mensaje genérico', async (t) => {
-  t.mock.method(User, 'findOne', () => ({ select: async () => null }));
+  t.mock.method(userRepository, 'findByEmailWithPassword', async () => null);
 
   const response = await jsonRequest('/api/auth/login', {
     email: 'noexiste@example.com',
@@ -117,8 +122,8 @@ test('HU-002 rechaza correo inexistente con el mismo mensaje genérico', async (
 
 test('HU-002 rechaza cuentas deshabilitadas sin revelar la causa', async (t) => {
   const passwordHash = await bcrypt.hash('clave-segura', 12);
-  const user = { id: '68f000000000000000000003', name: 'Usuario', email: 'usuario@example.com', passwordHash, isActive: false };
-  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+  const user = { id: '3', name: 'Usuario', email: 'usuario@example.com', passwordHash, isActive: false };
+  t.mock.method(userRepository, 'findByEmailWithPassword', async () => user);
 
   const response = await jsonRequest('/api/auth/login', {
     email: 'usuario@example.com',
@@ -131,8 +136,8 @@ test('HU-002 rechaza cuentas deshabilitadas sin revelar la causa', async (t) => 
 
 test('HU-002 acepta cuentas creadas antes del campo isActive', async (t) => {
   const passwordHash = await bcrypt.hash('clave-segura', 12);
-  const user = { id: '68f000000000000000000004', name: 'Usuario', email: 'usuario@example.com', passwordHash };
-  t.mock.method(User, 'findOne', () => ({ select: async () => user }));
+  const user = { id: '4', name: 'Usuario', email: 'usuario@example.com', passwordHash };
+  t.mock.method(userRepository, 'findByEmailWithPassword', async () => user);
 
   const response = await jsonRequest('/api/auth/login', {
     email: 'usuario@example.com',
@@ -143,9 +148,9 @@ test('HU-002 acepta cuentas creadas antes del campo isActive', async (t) => {
 });
 
 test('HU-002 protege /api/auth/me con Bearer JWT', async (t) => {
-  const user = { id: '68f000000000000000000005', name: 'Usuario', email: 'usuario@example.com', isActive: true };
+  const user = { id: '5', name: 'Usuario', email: 'usuario@example.com', isActive: true };
   const token = jwt.sign({ sub: user.id, email: user.email }, process.env.JWT_SECRET, { expiresIn: '1h' });
-  t.mock.method(User, 'findById', async () => user);
+  t.mock.method(userRepository, 'findById', async () => user);
 
   const response = await jsonRequest('/api/auth/me', undefined, 'GET', token);
 
@@ -162,8 +167,8 @@ test('HU-002 rechaza /api/auth/me sin token', async () => {
 });
 
 test('HU-002 rechaza /api/auth/me con token vencido', async (t) => {
-  const token = jwt.sign({ sub: '68f000000000000000000006' }, process.env.JWT_SECRET, { expiresIn: -1 });
-  t.mock.method(User, 'findById', async () => {
+  const token = jwt.sign({ sub: '6' }, process.env.JWT_SECRET, { expiresIn: -1 });
+  t.mock.method(userRepository, 'findById', async () => {
     throw new Error('No debe consultar usuarios para un JWT vencido.');
   });
 
@@ -184,9 +189,9 @@ test('las rutas inexistentes devuelven JSON 404', async () => {
   assert.deepEqual(await response.json(), { message: 'Ruta no encontrada.' });
 });
 
-test('la conexión exige MONGODB_URI si no se proporciona una URI', async () => {
-  const previous = process.env.MONGODB_URI;
-  delete process.env.MONGODB_URI;
-  await assert.rejects(connectDatabase(), /Configura MONGODB_URI/);
-  if (previous !== undefined) process.env.MONGODB_URI = previous;
+test('la conexión exige DATABASE_URL si no se proporciona una cadena de conexión', async () => {
+  const previous = process.env.DATABASE_URL;
+  delete process.env.DATABASE_URL;
+  await assert.rejects(connectDatabase(), /Configura DATABASE_URL/);
+  if (previous !== undefined) process.env.DATABASE_URL = previous;
 });

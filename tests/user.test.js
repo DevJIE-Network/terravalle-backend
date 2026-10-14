@@ -1,7 +1,7 @@
 const assert = require('node:assert/strict');
 const { after, before, test } = require('node:test');
 const jwt = require('jsonwebtoken');
-const User = require('../src/models/User');
+const userRepository = require('../src/repositories/user.repository');
 const { app } = require('../src/server');
 const { updateProfileSchema } = require('../src/schemas/user.schema');
 
@@ -9,12 +9,12 @@ process.env.JWT_SECRET = 'terravalle-hu003-test-secret-2026-32chars';
 process.env.JWT_EXPIRES_IN = '1h';
 
 const OWNER = {
-  id: '68f000000000000000000101',
+  id: '101',
   name: 'Usuario TerraValle',
   email: 'usuario@example.com',
   isActive: true,
 };
-const OTHER_ID = '68f000000000000000000202';
+const OTHER_ID = '202';
 
 let baseUrl;
 let server;
@@ -48,7 +48,7 @@ function call(path, { method = 'GET', body, token } = {}) {
 
 // El middleware de autenticación busca al usuario del token.
 function mockAuthenticatedUser(t, user = OWNER) {
-  t.mock.method(User, 'findById', async (id) => (id === user.id ? user : null));
+  t.mock.method(userRepository, 'findById', async (id) => (id === user.id ? user : null));
 }
 
 test('HU-003 el esquema acepta campos permitidos y rechaza el resto', () => {
@@ -91,10 +91,10 @@ test('HU-003 el perfil requiere sesión', async () => {
 
 test('HU-003 CA2 actualiza campos permitidos y devuelve la información vigente', async (t) => {
   mockAuthenticatedUser(t);
-  t.mock.method(User, 'exists', async () => null);
-  const update = t.mock.method(User, 'findByIdAndUpdate', async (id, changes) => ({
+  t.mock.method(userRepository, 'isEmailTakenByOther', async () => false);
+  const update = t.mock.method(userRepository, 'updateProfile', async (id, changes) => ({
     ...OWNER,
-    ...changes.$set,
+    ...changes,
     id,
   }));
 
@@ -110,15 +110,14 @@ test('HU-003 CA2 actualiza campos permitidos y devuelve la información vigente'
     user: { id: OWNER.id, name: 'Nombre Actualizado', email: 'nuevo@example.com' },
   });
 
-  const [id, changes, options] = update.mock.calls[0].arguments;
+  const [id, changes] = update.mock.calls[0].arguments;
   assert.equal(id, OWNER.id);
-  assert.deepEqual(changes, { $set: { name: 'Nombre Actualizado', email: 'nuevo@example.com' } });
-  assert.equal(options.runValidators, true);
+  assert.deepEqual(changes, { name: 'Nombre Actualizado', email: 'nuevo@example.com' });
 });
 
 test('HU-003 CA3 rechaza datos inválidos sin tocar la base de datos', async (t) => {
   mockAuthenticatedUser(t);
-  const update = t.mock.method(User, 'findByIdAndUpdate', async () => {
+  const update = t.mock.method(userRepository, 'updateProfile', async () => {
     throw new Error('No debe actualizar con datos inválidos.');
   });
 
@@ -137,7 +136,7 @@ test('HU-003 CA3 rechaza datos inválidos sin tocar la base de datos', async (t)
 
 test('HU-003 CA3 no permite modificar campos protegidos', async (t) => {
   mockAuthenticatedUser(t);
-  const update = t.mock.method(User, 'findByIdAndUpdate', async () => {
+  const update = t.mock.method(userRepository, 'updateProfile', async () => {
     throw new Error('No debe actualizar campos protegidos.');
   });
 
@@ -153,8 +152,8 @@ test('HU-003 CA3 no permite modificar campos protegidos', async (t) => {
 
 test('HU-003 CA3 rechaza un correo ya utilizado por otra cuenta', async (t) => {
   mockAuthenticatedUser(t);
-  const exists = t.mock.method(User, 'exists', async () => ({ _id: OTHER_ID }));
-  const update = t.mock.method(User, 'findByIdAndUpdate', async () => {
+  const emailCheck = t.mock.method(userRepository, 'isEmailTakenByOther', async () => true);
+  const update = t.mock.method(userRepository, 'updateProfile', async () => {
     throw new Error('No debe actualizar con un correo duplicado.');
   });
 
@@ -166,19 +165,16 @@ test('HU-003 CA3 rechaza un correo ya utilizado por otra cuenta', async (t) => {
 
   assert.equal(response.status, 409);
   assert.deepEqual(await response.json(), { message: 'El correo electrónico ya está registrado.' });
-  assert.deepEqual(exists.mock.calls[0].arguments[0], {
-    email: 'ocupado@example.com',
-    _id: { $ne: OWNER.id },
-  });
+  assert.deepEqual(emailCheck.mock.calls[0].arguments, ['ocupado@example.com', OWNER.id]);
   assert.equal(update.mock.callCount(), 0);
 });
 
 test('HU-003 CA3 responde 409 si el índice único detecta el correo duplicado', async (t) => {
   mockAuthenticatedUser(t);
-  t.mock.method(User, 'exists', async () => null);
-  t.mock.method(User, 'findByIdAndUpdate', async () => {
-    const error = new Error('E11000 duplicate key');
-    error.code = 11000;
+  t.mock.method(userRepository, 'isEmailTakenByOther', async () => false);
+  t.mock.method(userRepository, 'updateProfile', async () => {
+    const error = new Error('duplicate key value violates unique constraint "ux_users_email"');
+    error.code = '23505';
     throw error;
   });
 
@@ -193,7 +189,7 @@ test('HU-003 CA3 responde 409 si el índice único detecta el correo duplicado',
 
 test('HU-003 CA4 deniega consultar o modificar otra cuenta', async (t) => {
   mockAuthenticatedUser(t);
-  const update = t.mock.method(User, 'findByIdAndUpdate', async () => {
+  const update = t.mock.method(userRepository, 'updateProfile', async () => {
     throw new Error('No debe modificar otra cuenta.');
   });
   const token = tokenFor(OWNER);
