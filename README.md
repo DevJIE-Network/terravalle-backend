@@ -20,7 +20,7 @@ Este repositorio contiene la lógica del servidor, la gestión de datos y los se
 
 ## Estado del proyecto
 
-🚧 **En desarrollo.** La base del servidor incluye conexión a MongoDB y registro de usuarios. El inicio de sesión, las sesiones/tokens y las demás funcionalidades todavía no están implementados.
+🚧 **En desarrollo.** El servidor usa PostgreSQL (Azure Database for PostgreSQL) e incluye registro, inicio de sesión con JWT y consulta/edición del perfil propio. Las demás funcionalidades todavía no están implementadas.
 
 ## Estructura
 
@@ -30,16 +30,24 @@ terravalle-backend/
 │   ├── config/
 │   │   └── database.js
 │   ├── controllers/
-│   │   └── auth.controller.js
-│   ├── models/
-│   │   └── User.js
+│   │   ├── auth.controller.js
+│   │   └── user.controller.js
+│   ├── middleware/
+│   │   └── auth.middleware.js
+│   ├── repositories/
+│   │   └── user.repository.js   # consultas SQL de la tabla users
 │   ├── routes/
-│   │   └── auth.routes.js
+│   │   ├── auth.routes.js
+│   │   └── user.routes.js
 │   ├── schemas/
-│   │   └── auth.schema.js
+│   │   ├── auth.schema.js
+│   │   └── user.schema.js
+│   ├── utils/
+│   │   └── jwt.js
 │   └── server.js
 ├── tests/
-│   └── auth.test.js
+│   ├── auth.test.js
+│   └── user.test.js
 ├── .env
 ├── .env.example
 ├── .gitignore
@@ -50,11 +58,11 @@ terravalle-backend/
 
 ## Tecnologías
 
-Node.js (CommonJS), Express 5, MongoDB con Mongoose, Zod para validación, bcryptjs para hash de contraseñas, CORS y dotenv. Nodemon se utiliza durante el desarrollo.
+Node.js (CommonJS), Express 5, PostgreSQL con `pg` (node-postgres), Zod para validación, bcryptjs para hash de contraseñas, jsonwebtoken para sesiones, CORS y dotenv. Nodemon se utiliza durante el desarrollo.
 
 ## Instalación y ejecución
 
-Requisitos: **Node.js 20.19 o superior**, npm y una instancia de MongoDB local o en Atlas.
+Requisitos: **Node.js 20.19 o superior**, npm y una base de datos PostgreSQL (local o Azure) con el esquema de TerraValle cargado.
 
 ```bash
 npm install
@@ -66,7 +74,9 @@ Copia `.env.example` a `.env` si este último no existe y ajusta sus valores:
 | --- | --- | --- |
 | `NODE_ENV` | Entorno de ejecución | `development` |
 | `PORT` | Puerto HTTP | `3000` |
-| `MONGODB_URI` | Conexión a MongoDB | `mongodb://127.0.0.1:27017/terravalle` |
+| `DATABASE_URL` | Conexión a PostgreSQL | `postgresql://usuario:contraseña@servidor:5432/terravalle?sslmode=verify-full` |
+| `JWT_SECRET` | Firma de los tokens (mínimo 32 caracteres) | `cambia-esto-por-un-secreto-largo` |
+| `JWT_EXPIRES_IN` | Duración del token | `1h` |
 | `CORS_ORIGIN` | Origen permitido del frontend | `http://localhost:5173` |
 
 `.env` es configuración local y no se versiona. No añadas credenciales reales a `.env.example`.
@@ -75,13 +85,13 @@ Copia `.env.example` a `.env` si este último no existe y ajusta sus valores:
 npm run dev
 ```
 
-Para ejecutar sin recarga automática, utiliza `npm start`. El servidor se inicia únicamente después de conectarse a MongoDB y preparar el índice de correo único.
+Para ejecutar sin recarga automática, utiliza `npm start`. El servidor se inicia únicamente después de conectarse a PostgreSQL.
 
 ## Endpoints disponibles
 
 ### `GET /api/health`
 
-Comprueba que el servidor HTTP responde: `{"status":"ok"}`. No es una comprobación de disponibilidad de MongoDB.
+Comprueba que el servidor HTTP responde: `{"status":"ok"}`. No es una comprobación de disponibilidad de la base de datos.
 
 ### `POST /api/auth/register`
 
@@ -131,7 +141,7 @@ Cuerpo de ejemplo para `PATCH`:
 npm test
 ```
 
-Las pruebas usan el ejecutor integrado de Node.js y sustituyen la persistencia por mocks; no requieren MongoDB. La conexión y el almacenamiento reales deben comprobarse con tu instancia de MongoDB.
+Las pruebas usan el ejecutor integrado de Node.js y sustituyen el repositorio de usuarios por mocks; no requieren base de datos. La conexión y el almacenamiento reales deben comprobarse con tu instancia de PostgreSQL.
 
 ## Metodología
 
