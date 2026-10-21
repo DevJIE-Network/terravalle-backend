@@ -2,6 +2,11 @@ const {
   createPropertySchema,
 } = require('../schemas/property.schema');
 
+const {
+  saveCharacteristicsSchema,
+  toCharacteristicsRecord,
+} = require('../schemas/property-characteristics.schema');
+
 const propertyRepository = require(
   '../repositories/property.repository',
 );
@@ -70,7 +75,76 @@ async function getPropertyTypes(_req, res, next) {
   }
 }
 
+const PROPERTY_NOT_FOUND_MESSAGE = 'Propiedad no encontrada.';
+const NOT_OWNER_MESSAGE = 'No tienes permiso para modificar esta propiedad.';
+
+// Verifica que la propiedad exista y pertenezca al usuario autenticado.
+// Devuelve la propiedad, o null después de enviar la respuesta de error (404 / 403).
+async function loadOwnedProperty(req, res) {
+  const property = await propertyRepository.findPropertyById(req.params.id);
+
+  if (!property) {
+    res.status(404).json({ message: PROPERTY_NOT_FOUND_MESSAGE });
+    return null;
+  }
+
+  if (property.ownerId !== String(req.auth.userId)) {
+    res.status(403).json({ message: NOT_OWNER_MESSAGE });
+    return null;
+  }
+
+  return property;
+}
+
+// HU-005: registra o actualiza dimensiones del terreno y características de construcción.
+async function saveCharacteristics(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req, res);
+    if (!property) return undefined;
+
+    const result = saveCharacteristicsSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: 'Las dimensiones y características no son válidas.',
+        errors: result.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const characteristics = await propertyRepository.upsertCharacteristics(
+      property.id,
+      toCharacteristicsRecord(result.data),
+    );
+
+    return res.status(200).json({
+      message: 'Dimensiones y características guardadas correctamente.',
+      characteristics,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// HU-005: consulta las dimensiones y características de una propiedad propia.
+async function getCharacteristics(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req, res);
+    if (!property) return undefined;
+
+    const characteristics = await propertyRepository.findCharacteristicsByPropertyId(property.id);
+
+    return res.status(200).json({ characteristics });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   createProperty,
   getPropertyTypes,
+  saveCharacteristics,
+  getCharacteristics,
 };
