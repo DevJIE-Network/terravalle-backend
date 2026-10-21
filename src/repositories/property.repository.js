@@ -15,19 +15,42 @@ const PUBLIC_COLUMNS = `
   updated_at
 `;
 
+const CHARACTERISTICS_COLUMNS = `
+  property_id,
+  land_area_m2,
+  frontage_m,
+  depth_m,
+  has_construction,
+  built_area_m2,
+  bedrooms,
+  bathrooms,
+  floors,
+  parking_spaces,
+  age_years,
+  general_condition,
+  created_at,
+  updated_at
+`;
+
 function toProperty(row) {
-  if (!row) return null;
+  if (!row) {
+    return null;
+  }
 
   return {
     id: String(row.id),
     ownerId: String(row.owner_id),
-    propertyTypeId: Number(row.property_type_id),
+    propertyTypeId: Number(
+      row.property_type_id,
+    ),
     title: row.title,
     description: row.description,
     publicationPrice:
       row.publication_price === null
         ? null
-        : Number(row.publication_price),
+        : Number(
+            row.publication_price,
+          ),
     status: row.status,
     publishedAt: row.published_at,
     withdrawnAt: row.withdrawn_at,
@@ -37,7 +60,104 @@ function toProperty(row) {
   };
 }
 
-async function findPropertyTypeById(id) {
+// Los ID de PostgreSQL son BIGINT.
+// Solo se aceptan cadenas numéricas positivas.
+function isValidId(id) {
+  return /^[1-9]\d{0,18}$/.test(
+    String(id),
+  );
+}
+
+const toNumberOrNull = (value) =>
+  value === null ||
+  value === undefined
+    ? null
+    : Number(value);
+
+function toCharacteristics(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    propertyId: String(
+      row.property_id,
+    ),
+
+    landArea: toNumberOrNull(
+      row.land_area_m2,
+    ),
+
+    frontage: toNumberOrNull(
+      row.frontage_m,
+    ),
+
+    depth: toNumberOrNull(
+      row.depth_m,
+    ),
+
+    hasConstruction:
+      row.has_construction,
+
+    builtArea: toNumberOrNull(
+      row.built_area_m2,
+    ),
+
+    bedrooms: toNumberOrNull(
+      row.bedrooms,
+    ),
+
+    bathrooms: toNumberOrNull(
+      row.bathrooms,
+    ),
+
+    floors: toNumberOrNull(
+      row.floors,
+    ),
+
+    parkingSpaces: toNumberOrNull(
+      row.parking_spaces,
+    ),
+
+    constructionAge: toNumberOrNull(
+      row.age_years,
+    ),
+
+    generalCondition:
+      row.general_condition ?? null,
+
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+/**
+ * Busca una propiedad activa/no eliminada
+ * por su identificador.
+ */
+async function findPropertyById(id) {
+  if (!isValidId(id)) {
+    return null;
+  }
+
+  const { rows } = await query(
+    `SELECT ${PUBLIC_COLUMNS}
+     FROM properties
+     WHERE id = $1
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    [id],
+  );
+
+  return toProperty(rows[0]);
+}
+
+/**
+ * Busca un tipo de propiedad.
+ */
+async function findPropertyTypeById(
+  id,
+) {
   const { rows } = await query(
     `SELECT
        id,
@@ -50,16 +170,24 @@ async function findPropertyTypeById(id) {
     [id],
   );
 
-  if (!rows[0]) return null;
+  if (!rows[0]) {
+    return null;
+  }
 
   return {
     id: Number(rows[0].id),
     name: rows[0].name,
-    description: rows[0].description,
-    isActive: rows[0].is_active,
+    description:
+      rows[0].description,
+    isActive:
+      rows[0].is_active,
   };
 }
 
+/**
+ * HU-004
+ * Crea una nueva propiedad.
+ */
 async function createProperty({
   ownerId,
   propertyTypeId,
@@ -89,19 +217,11 @@ async function createProperty({
   return toProperty(rows[0]);
 }
 
-async function findById(id) {
-  const { rows } = await query(
-    `SELECT ${PUBLIC_COLUMNS}
-     FROM properties
-     WHERE id = $1
-       AND deleted_at IS NULL
-     LIMIT 1`,
-    [id],
-  );
-
-  return toProperty(rows[0]);
-}
-
+/**
+ * HU-020
+ * Guarda una fotografía asociada
+ * a una propiedad.
+ */
 async function createPhoto({
   propertyId,
   imageUrl,
@@ -121,7 +241,15 @@ async function createPhoto({
        is_primary,
        sort_order
      )
-     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     VALUES (
+       $1,
+       $2,
+       $3,
+       $4,
+       $5,
+       $6,
+       $7
+     )
      RETURNING
        id,
        property_id,
@@ -147,19 +275,165 @@ async function createPhoto({
 
   return {
     id: String(row.id),
-    propertyId: String(row.property_id),
-    imageUrl: row.image_url,
-    storageKey: row.storage_key,
-    mimeType: row.mime_type,
-    fileSizeBytes: Number(row.file_size_bytes),
-    isPrimary: row.is_primary,
-    sortOrder: row.sort_order,
-    createdAt: row.created_at,
+
+    propertyId: String(
+      row.property_id,
+    ),
+
+    imageUrl:
+      row.image_url,
+
+    storageKey:
+      row.storage_key,
+
+    mimeType:
+      row.mime_type,
+
+    fileSizeBytes:
+      Number(
+        row.file_size_bytes,
+      ),
+
+    isPrimary:
+      row.is_primary,
+
+    sortOrder:
+      row.sort_order,
+
+    createdAt:
+      row.created_at,
   };
 }
+
+/**
+ * HU-005
+ * Consulta características
+ * de una propiedad.
+ */
+async function findCharacteristicsByPropertyId(
+  propertyId,
+) {
+  if (!isValidId(propertyId)) {
+    return null;
+  }
+
+  const { rows } = await query(
+    `SELECT ${CHARACTERISTICS_COLUMNS}
+     FROM property_features
+     WHERE property_id = $1`,
+    [propertyId],
+  );
+
+  return toCharacteristics(
+    rows[0],
+  );
+}
+
+/**
+ * HU-005
+ * Inserta o actualiza
+ * características de una propiedad.
+ */
+async function upsertCharacteristics(
+  propertyId,
+  data,
+) {
+  const { rows } = await query(
+    `INSERT INTO property_features (
+       property_id,
+       land_area_m2,
+       frontage_m,
+       depth_m,
+       has_construction,
+       built_area_m2,
+       bedrooms,
+       bathrooms,
+       floors,
+       parking_spaces,
+       age_years,
+       general_condition
+     )
+     VALUES (
+       $1,
+       $2,
+       $3,
+       $4,
+       $5,
+       $6,
+       $7,
+       $8,
+       $9,
+       $10,
+       $11,
+       $12
+     )
+     ON CONFLICT (property_id)
+     DO UPDATE SET
+       land_area_m2 =
+         EXCLUDED.land_area_m2,
+
+       frontage_m =
+         EXCLUDED.frontage_m,
+
+       depth_m =
+         EXCLUDED.depth_m,
+
+       has_construction =
+         EXCLUDED.has_construction,
+
+       built_area_m2 =
+         EXCLUDED.built_area_m2,
+
+       bedrooms =
+         EXCLUDED.bedrooms,
+
+       bathrooms =
+         EXCLUDED.bathrooms,
+
+       floors =
+         EXCLUDED.floors,
+
+       parking_spaces =
+         EXCLUDED.parking_spaces,
+
+       age_years =
+         EXCLUDED.age_years,
+
+       general_condition =
+         EXCLUDED.general_condition
+
+     RETURNING
+       ${CHARACTERISTICS_COLUMNS}`,
+    [
+      propertyId,
+      data.landArea,
+      data.frontage,
+      data.depth,
+      data.hasConstruction,
+      data.builtArea,
+      data.bedrooms,
+      data.bathrooms,
+      data.floors,
+      data.parkingSpaces,
+      data.constructionAge,
+      data.generalCondition,
+    ],
+  );
+
+  return toCharacteristics(
+    rows[0],
+  );
+}
+
 module.exports = {
+  isValidId,
+
+  findPropertyById,
   findPropertyTypeById,
+
   createProperty,
-   findById,
   createPhoto,
+
+  findCharacteristicsByPropertyId,
+  upsertCharacteristics,
 };
