@@ -5,22 +5,39 @@ const {
 const {
   saveCharacteristicsSchema,
   toCharacteristicsRecord,
-} = require('../schemas/property-characteristics.schema');
+} = require(
+  '../schemas/property-characteristics.schema',
+);
 
 const propertyRepository = require(
   '../repositories/property.repository',
 );
 
+const PROPERTY_NOT_FOUND_MESSAGE =
+  'Propiedad no encontrada.';
+
+const NOT_OWNER_MESSAGE =
+  'No tienes permiso para modificar esta propiedad.';
+
+/**
+ * HU-004
+ * Registra una nueva propiedad.
+ */
 async function createProperty(req, res, next) {
-  const result = createPropertySchema.safeParse(req.body);
+  const result =
+    createPropertySchema.safeParse(req.body);
 
   if (!result.success) {
     return res.status(400).json({
-      message: 'Los datos de la propiedad no son válidos.',
-      errors: result.error.issues.map((issue) => ({
-        field: issue.path.join('.'),
-        message: issue.message,
-      })),
+      message:
+        'Los datos de la propiedad no son válidos.',
+
+      errors: result.error.issues.map(
+        (issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        }),
+      ),
     });
   }
 
@@ -37,7 +54,10 @@ async function createProperty(req, res, next) {
         propertyTypeId,
       );
 
-    if (!propertyType || !propertyType.isActive) {
+    if (
+      !propertyType ||
+      !propertyType.isActive
+    ) {
       return res.status(400).json({
         message:
           'El tipo de propiedad seleccionado no es válido.',
@@ -54,7 +74,8 @@ async function createProperty(req, res, next) {
       });
 
     return res.status(201).json({
-      message: 'Propiedad registrada correctamente.',
+      message:
+        'Propiedad registrada correctamente.',
       property,
     });
   } catch (error) {
@@ -62,65 +83,192 @@ async function createProperty(req, res, next) {
   }
 }
 
-async function getPropertyTypes(_req, res, next) {
-  try {
-    const propertyTypes =
-      await propertyRepository.listActiveTypes();
-
-    return res.status(200).json({
-      propertyTypes,
-    });
-  } catch (error) {
-    return next(error);
-  }
-}
-
-const PROPERTY_NOT_FOUND_MESSAGE = 'Propiedad no encontrada.';
-const NOT_OWNER_MESSAGE = 'No tienes permiso para modificar esta propiedad.';
-
-// Verifica que la propiedad exista y pertenezca al usuario autenticado.
-// Devuelve la propiedad, o null después de enviar la respuesta de error (404 / 403).
-async function loadOwnedProperty(req, res) {
-  const property = await propertyRepository.findPropertyById(req.params.id);
+/**
+ * Comprueba que una propiedad exista
+ * y pertenezca al usuario autenticado.
+ */
+async function loadOwnedProperty(
+  propertyId,
+  userId,
+  res,
+) {
+  const property =
+    await propertyRepository.findPropertyById(
+      propertyId,
+    );
 
   if (!property) {
-    res.status(404).json({ message: PROPERTY_NOT_FOUND_MESSAGE });
+    res.status(404).json({
+      message:
+        PROPERTY_NOT_FOUND_MESSAGE,
+    });
+
     return null;
   }
 
-  if (property.ownerId !== String(req.auth.userId)) {
-    res.status(403).json({ message: NOT_OWNER_MESSAGE });
+  if (
+    property.ownerId !==
+    String(userId)
+  ) {
+    res.status(403).json({
+      message:
+        NOT_OWNER_MESSAGE,
+    });
+
     return null;
   }
 
   return property;
 }
 
-// HU-005: registra o actualiza dimensiones del terreno y características de construcción.
-async function saveCharacteristics(req, res, next) {
+/**
+ * HU-020
+ * Guarda las fotografías de una propiedad.
+ */
+async function uploadPhotos(
+  req,
+  res,
+  next,
+) {
   try {
-    const property = await loadOwnedProperty(req, res);
-    if (!property) return undefined;
+    const { propertyId } =
+      req.params;
 
-    const result = saveCharacteristicsSchema.safeParse(req.body);
+    const property =
+      await loadOwnedProperty(
+        propertyId,
+        req.auth.userId,
+        res,
+      );
 
-    if (!result.success) {
+    if (!property) {
+      return undefined;
+    }
+
+    if (
+      !req.files ||
+      req.files.length === 0
+    ) {
       return res.status(400).json({
-        message: 'Las dimensiones y características no son válidas.',
-        errors: result.error.issues.map((issue) => ({
-          field: issue.path.join('.'),
-          message: issue.message,
-        })),
+        message:
+          'Selecciona al menos una fotografía.',
       });
     }
 
-    const characteristics = await propertyRepository.upsertCharacteristics(
-      property.id,
-      toCharacteristicsRecord(result.data),
+    let primaryIndex = Number(
+      req.body.primaryIndex ?? 0,
     );
 
+    if (
+      !Number.isInteger(primaryIndex) ||
+      primaryIndex < 0 ||
+      primaryIndex >= req.files.length
+    ) {
+      primaryIndex = 0;
+    }
+
+    const photos = [];
+
+    for (
+      let index = 0;
+      index < req.files.length;
+      index += 1
+    ) {
+      const file =
+        req.files[index];
+
+      const photo =
+        await propertyRepository.createPhoto({
+          propertyId:
+            property.id,
+
+          imageUrl:
+            `/uploads/properties/${file.filename}`,
+
+          storageKey:
+            file.filename,
+
+          mimeType:
+            file.mimetype,
+
+          fileSizeBytes:
+            file.size,
+
+          isPrimary:
+            index === primaryIndex,
+
+          sortOrder:
+            index,
+        });
+
+      photos.push(photo);
+    }
+
+    return res.status(201).json({
+      message:
+        'Fotografías guardadas correctamente.',
+      photos,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * HU-005
+ * Registra o actualiza dimensiones
+ * y características de construcción.
+ */
+async function saveCharacteristics(
+  req,
+  res,
+  next,
+) {
+  try {
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
+
+    if (!property) {
+      return undefined;
+    }
+
+    const result =
+      saveCharacteristicsSchema.safeParse(
+        req.body,
+      );
+
+    if (!result.success) {
+      return res.status(400).json({
+        message:
+          'Las dimensiones y características no son válidas.',
+
+        errors:
+          result.error.issues.map(
+            (issue) => ({
+              field:
+                issue.path.join('.'),
+              message:
+                issue.message,
+            }),
+          ),
+      });
+    }
+
+    const characteristics =
+      await propertyRepository.upsertCharacteristics(
+        property.id,
+        toCharacteristicsRecord(
+          result.data,
+        ),
+      );
+
     return res.status(200).json({
-      message: 'Dimensiones y características guardadas correctamente.',
+      message:
+        'Dimensiones y características guardadas correctamente.',
       characteristics,
     });
   } catch (error) {
@@ -128,15 +276,36 @@ async function saveCharacteristics(req, res, next) {
   }
 }
 
-// HU-005: consulta las dimensiones y características de una propiedad propia.
-async function getCharacteristics(req, res, next) {
+/**
+ * HU-005
+ * Consulta las dimensiones y características
+ * de una propiedad perteneciente al usuario.
+ */
+async function getCharacteristics(
+  req,
+  res,
+  next,
+) {
   try {
-    const property = await loadOwnedProperty(req, res);
-    if (!property) return undefined;
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
 
-    const characteristics = await propertyRepository.findCharacteristicsByPropertyId(property.id);
+    if (!property) {
+      return undefined;
+    }
 
-    return res.status(200).json({ characteristics });
+    const characteristics =
+      await propertyRepository.findCharacteristicsByPropertyId(
+        property.id,
+      );
+
+    return res.status(200).json({
+      characteristics,
+    });
   } catch (error) {
     return next(error);
   }
@@ -144,7 +313,7 @@ async function getCharacteristics(req, res, next) {
 
 module.exports = {
   createProperty,
-  getPropertyTypes,
+  uploadPhotos,
   saveCharacteristics,
   getCharacteristics,
 };
