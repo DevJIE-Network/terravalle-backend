@@ -89,7 +89,77 @@ async function createProperty({
   return toProperty(rows[0]);
 }
 
+async function findById(id) {
+  const { rows } = await query(
+    `SELECT ${PUBLIC_COLUMNS}
+     FROM properties
+     WHERE id = $1
+       AND deleted_at IS NULL
+     LIMIT 1`,
+    [id],
+  );
+
+  return toProperty(rows[0]);
+}
+
+async function createPhoto({
+  propertyId,
+  imageUrl,
+  storageKey,
+  mimeType,
+  fileSizeBytes,
+  isPrimary,
+  sortOrder,
+}) {
+  const { rows } = await query(
+    `INSERT INTO property_photos (
+       property_id,
+       image_url,
+       storage_key,
+       mime_type,
+       file_size_bytes,
+       is_primary,
+       sort_order
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7)
+     RETURNING
+       id,
+       property_id,
+       image_url,
+       storage_key,
+       mime_type,
+       file_size_bytes,
+       is_primary,
+       sort_order,
+       created_at`,
+    [
+      propertyId,
+      imageUrl,
+      storageKey,
+      mimeType,
+      fileSizeBytes,
+      isPrimary,
+      sortOrder,
+    ],
+  );
+
+  const row = rows[0];
+
+  return {
+    id: String(row.id),
+    propertyId: String(row.property_id),
+    imageUrl: row.image_url,
+    storageKey: row.storage_key,
+    mimeType: row.mime_type,
+    fileSizeBytes: Number(row.file_size_bytes),
+    isPrimary: row.is_primary,
+    sortOrder: row.sort_order,
+    createdAt: row.created_at,
+  };
+}
 module.exports = {
   findPropertyTypeById,
   createProperty,
+   findById,
+  createPhoto,
 };
