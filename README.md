@@ -31,22 +31,27 @@ terravalle-backend/
 │   │   └── database.js
 │   ├── controllers/
 │   │   ├── auth.controller.js
+│   │   ├── property.controller.js
 │   │   └── user.controller.js
 │   ├── middleware/
 │   │   └── auth.middleware.js
 │   ├── repositories/
-│   │   └── user.repository.js   # consultas SQL de la tabla users
+│   │   ├── property.repository.js   # consultas SQL de properties y property_features
+│   │   └── user.repository.js       # consultas SQL de la tabla users
 │   ├── routes/
 │   │   ├── auth.routes.js
+│   │   ├── property.routes.js
 │   │   └── user.routes.js
 │   ├── schemas/
 │   │   ├── auth.schema.js
+│   │   ├── property-characteristics.schema.js   # validación de HU-005
 │   │   └── user.schema.js
 │   ├── utils/
 │   │   └── jwt.js
 │   └── server.js
 ├── tests/
 │   ├── auth.test.js
+│   ├── property-characteristics.test.js
 │   └── user.test.js
 ├── .env
 ├── .env.example
@@ -135,13 +140,61 @@ Cuerpo de ejemplo para `PATCH`:
 - `email` se normaliza a minúsculas y debe seguir siendo único (`409` si ya lo usa otra cuenta).
 - Respuestas: `200` con el perfil vigente, `400` por datos inválidos, `401` sin sesión válida, `403` al intentar acceder a otra cuenta y `409` por correo duplicado.
 
+### Dimensiones y características del inmueble (HU-005)
+
+Complementan una propiedad ya registrada (HU-004) con las medidas del terreno y, si existe, los datos de la construcción. Requieren `Authorization: Bearer <token>` y solo el dueño de la propiedad puede usarlas.
+
+Los datos se guardan en la tabla `property_features` del esquema de TerraValle (una fila por propiedad, con `UNIQUE (property_id)`); no requiere migraciones adicionales.
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `PUT` | `/api/properties/:id/characteristics` | Crea o reemplaza las dimensiones y características de la propiedad. |
+| `GET` | `/api/properties/:id/characteristics` | Devuelve `{ "characteristics": {...} }`, o `null` si aún no se capturan. |
+
+Cuerpo de ejemplo para una propiedad **con** construcción:
+
+```json
+{
+  "landArea": 200,
+  "frontage": 10,
+  "depth": 20,
+  "hasConstruction": true,
+  "builtArea": 150,
+  "bedrooms": 3,
+  "bathrooms": 2,
+  "floors": 2,
+  "parkingSpaces": 1,
+  "constructionAge": 5,
+  "generalCondition": "bueno"
+}
+```
+
+Para un terreno **sin** construcción basta con `{ "landArea": 200, "frontage": 10, "depth": 20, "hasConstruction": false }`.
+
+| Campo | Regla |
+| --- | --- |
+| `landArea` | Obligatorio. Superficie del terreno en m², mayor que 0, máximo 2 decimales. |
+| `frontage`, `depth` | Opcionales. Frente y fondo en metros, mayores que 0. Si se envían ambos, `landArea` no puede superar `frontage × depth` (10 % de holgura). |
+| `hasConstruction` | Obligatorio. `true` o `false`. |
+| `builtArea` | Obligatorio con construcción: m² mayores que 0 y no mayores que `landArea × floors`. |
+| `bedrooms` | Obligatorio con construcción: entero ≥ 0. |
+| `bathrooms` | Obligatorio con construcción: ≥ 0, entero o medio baño (1, 1.5, 2...). |
+| `floors` | Obligatorio con construcción: entero ≥ 1. |
+| `constructionAge` | Obligatorio con construcción: años, entero ≥ 0 (0 = nueva). |
+| `generalCondition` | Obligatorio con construcción: `excelente`, `bueno`, `regular` o `malo`. |
+| `parkingSpaces` | Opcional con construcción: entero ≥ 0 (si se omite se guarda 0). |
+
+- Con `hasConstruction: false` no se exige ningún campo de edificación y, si se envía alguno con valor, se rechaza con `400`. Los valores vacíos o `null` se tratan como ausentes.
+- Los datos son declarados por el vendedor: son informativos y no sustituyen documentación oficial.
+- Respuestas: `200` guardado o consultado, `400` datos inválidos (con el detalle por campo en `errors`), `401` sin sesión válida, `403` si la propiedad es de otro vendedor y `404` si no existe.
+
 ## Pruebas
 
 ```bash
 npm test
 ```
 
-Las pruebas usan el ejecutor integrado de Node.js y sustituyen el repositorio de usuarios por mocks; no requieren base de datos. La conexión y el almacenamiento reales deben comprobarse con tu instancia de PostgreSQL.
+Las pruebas usan el ejecutor integrado de Node.js y sustituyen los repositorios por mocks; no requieren base de datos. La conexión y el almacenamiento reales deben comprobarse con tu instancia de PostgreSQL.
 
 ## Metodología
 
