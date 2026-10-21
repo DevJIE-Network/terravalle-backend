@@ -6,7 +6,7 @@ const { connectDatabase } = require('./config/database');
 const authRoutes = require('./routes/auth.routes');
 const userRoutes = require('./routes/user.routes');
 const propertyRoutes = require('./routes/property.routes');
-
+const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
@@ -14,6 +14,7 @@ app.disable('x-powered-by');
 app.use(cors());
 app.use(express.json({ limit: '10kb' }));
 app.use('/api/properties', propertyRoutes);
+app.use(express.json({ limit: '10kb' }));
 
 app.get('/', (_req, res) => {
   res.json({
