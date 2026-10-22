@@ -13,6 +13,15 @@ const propertyRepository = require(
   '../repositories/property.repository',
 );
 
+const serviceRepository = require(
+  '../repositories/service.repository',
+);
+
+const {
+  saveServicesSchema,
+  uniqueServiceIds,
+} = require('../schemas/property-services.schema');
+
 const PROPERTY_NOT_FOUND_MESSAGE =
   'Propiedad no encontrada.';
 
@@ -311,9 +320,82 @@ async function getCharacteristics(
   }
 }
 
+/**
+ * HU-006
+ * Consulta los servicios registrados en una propiedad del usuario.
+ */
+async function getServices(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req.params.id, req.auth.userId, res);
+
+    if (!property) {
+      return undefined;
+    }
+
+    const services = await serviceRepository.findServicesByPropertyId(property.id);
+
+    return res.status(200).json({ services });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * HU-006
+ * Registra o actualiza los servicios disponibles en una propiedad.
+ * Recibe la selección completa: lo que no venga se desmarca.
+ */
+async function saveServices(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req.params.id, req.auth.userId, res);
+
+    if (!property) {
+      return undefined;
+    }
+
+    const result = saveServicesSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return res.status(400).json({
+        message: 'La selección de servicios no es válida.',
+        errors: result.error.issues.map((issue) => ({
+          field: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
+    }
+
+    const serviceIds = uniqueServiceIds(result.data.serviceIds);
+
+    // Solo se aceptan servicios del catálogo de TerraValle que sigan activos.
+    const validServices = await serviceRepository.findActiveServicesByIds(serviceIds);
+
+    if (validServices.length !== serviceIds.length) {
+      const validIds = new Set(validServices.map((service) => service.id));
+      const invalidIds = serviceIds.filter((id) => !validIds.has(id));
+
+      return res.status(400).json({
+        message: 'Uno o más servicios no existen o no están disponibles.',
+        invalidServiceIds: invalidIds,
+      });
+    }
+
+    const services = await serviceRepository.replacePropertyServices(property.id, serviceIds);
+
+    return res.status(200).json({
+      message: 'Servicios de la propiedad guardados correctamente.',
+      services,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   createProperty,
   uploadPhotos,
   saveCharacteristics,
   getCharacteristics,
-};
+  getServices,
+  saveServices,
+};
