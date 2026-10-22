@@ -28,6 +28,9 @@ const PROPERTY_NOT_FOUND_MESSAGE =
 const NOT_OWNER_MESSAGE =
   'No tienes permiso para modificar esta propiedad.';
 
+const NOT_OWNER_VIEW_MESSAGE =
+  'No tienes permiso para consultar esta propiedad.';
+
 /**
  * HU-004
  * Registra una nueva propiedad.
@@ -95,11 +98,14 @@ async function createProperty(req, res, next) {
 /**
  * Comprueba que una propiedad exista
  * y pertenezca al usuario autenticado.
+ * `forbiddenMessage` permite distinguir si se intentó
+ * consultar o modificar una propiedad ajena.
  */
 async function loadOwnedProperty(
   propertyId,
   userId,
   res,
+  forbiddenMessage = NOT_OWNER_MESSAGE,
 ) {
   const property =
     await propertyRepository.findPropertyById(
@@ -121,7 +127,7 @@ async function loadOwnedProperty(
   ) {
     res.status(403).json({
       message:
-        NOT_OWNER_MESSAGE,
+        forbiddenMessage,
     });
 
     return null;
@@ -301,6 +307,7 @@ async function getCharacteristics(
         req.params.id,
         req.auth.userId,
         res,
+        NOT_OWNER_VIEW_MESSAGE,
       );
 
     if (!property) {
@@ -326,7 +333,12 @@ async function getCharacteristics(
  */
 async function getServices(req, res, next) {
   try {
-    const property = await loadOwnedProperty(req.params.id, req.auth.userId, res);
+    const property = await loadOwnedProperty(
+      req.params.id,
+      req.auth.userId,
+      res,
+      NOT_OWNER_VIEW_MESSAGE,
+    );
 
     if (!property) {
       return undefined;

@@ -228,6 +228,7 @@ test('HU-006 CA4 consultar los servicios de una propiedad ajena devuelve 403', a
   await getServices(mockReq({ userId: '202' }), res, assert.fail);
 
   assert.equal(res.statusCode, 403);
+  assert.equal(res.body.message, 'No tienes permiso para consultar esta propiedad.');
   assert.equal(find.mock.callCount(), 0);
 });
 
