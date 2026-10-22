@@ -5,6 +5,8 @@ const {
   uploadPhotos,
   saveCharacteristics,
   getCharacteristics,
+  getServices,
+  saveServices,
 } = require('../controllers/property.controller');
 
 const {
@@ -63,4 +65,26 @@ router.put(
   saveCharacteristics,
 );
 
-module.exports = router;
+/**
+ * HU-006
+ * Consultar los servicios disponibles
+ * registrados en una propiedad.
+ */
+router.get(
+  '/:id/services',
+  requireAuth,
+  getServices,
+);
+
+/**
+ * HU-006
+ * Registrar o actualizar los servicios
+ * disponibles en una propiedad.
+ */
+router.put(
+  '/:id/services',
+  requireAuth,
+  saveServices,
+);
+
+module.exports = router;

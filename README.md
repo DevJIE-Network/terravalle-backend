@@ -188,6 +188,29 @@ Para un terreno **sin** construcción basta con `{ "landArea": 200, "frontage": 
 - Los datos son declarados por el vendedor: son informativos y no sustituyen documentación oficial.
 - Respuestas: `200` guardado o consultado, `400` datos inválidos (con el detalle por campo en `errors`), `401` sin sesión válida, `403` si la propiedad es de otro vendedor y `404` si no existe.
 
+### Servicios disponibles en la propiedad (HU-006)
+
+Permiten indicar los servicios e infraestructura del inmueble o de su acceso inmediato. Los servicios salen de un catálogo controlado por TerraValle (tabla `services`) y se asocian a la propiedad en `property_services`, cuya llave primaria `(property_id, service_id)` impide duplicados. No requiere migraciones adicionales: el catálogo inicial ya viene en el script SQL.
+
+| Método | Ruta | Sesión | Descripción |
+| --- | --- | --- | --- |
+| `GET` | `/api/services` | No | Catálogo de servicios activos. |
+| `GET` | `/api/properties/:id/services` | Sí, dueño | Servicios registrados en la propiedad. |
+| `PUT` | `/api/properties/:id/services` | Sí, dueño | Reemplaza la selección completa de servicios. |
+
+Catálogo inicial: `1` Agua potable, `2` Electricidad, `3` Drenaje, `4` Gas, `5` Internet, `6` Alumbrado público, `7` Pavimentación y `8` Banqueta.
+
+Cuerpo de ejemplo para `PUT`:
+
+```json
+{ "serviceIds": [1, 2, 3, 6] }
+```
+
+- `serviceIds` es la **selección completa**: los servicios que no vengan se desmarcan y `[]` quita todos.
+- Los id repetidos se guardan una sola vez. Un id que no existe o está inactivo se rechaza con `400` e `invalidServiceIds`.
+- Los datos son declarativos: no representan certificación de disponibilidad por parte de los proveedores.
+- Respuestas: `200` con `{ "services": [...] }` vigentes, `400` datos inválidos, `401` sin sesión válida, `403` si la propiedad es de otro vendedor y `404` si no existe.
+
 ## Pruebas
 
 ```bash
