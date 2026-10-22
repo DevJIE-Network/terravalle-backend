@@ -8,3 +8,5 @@ logs/
 .vscode/
 .idea/
 .DS_Store
+# Reporte de cobertura (npm run test:coverage)
+lcov.info
