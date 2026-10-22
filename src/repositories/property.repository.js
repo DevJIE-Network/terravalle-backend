@@ -425,6 +425,134 @@ async function upsertCharacteristics(
   );
 }
 
+/**
+ * HU-008
+ * Cuenta las propiedades del vendedor (sin las eliminadas lógicamente),
+ * opcionalmente filtradas por estado.
+ */
+async function countPropertiesByOwnerId(ownerId, status = null) {
+  const { rows } = await query(
+    `SELECT COUNT(*) AS total
+     FROM properties
+     WHERE owner_id = $1
+       AND deleted_at IS NULL
+       AND ($2::varchar IS NULL OR status = $2::varchar)`,
+    [ownerId, status],
+  );
+
+  return Number(rows[0].total);
+}
+
+/**
+ * HU-008
+ * Lista únicamente las propiedades del vendedor, de la más reciente a la más antigua.
+ * Incluye las retiradas para conservar la trazabilidad.
+ */
+async function findPropertiesByOwnerId(ownerId, { status = null, limit = 20, offset = 0 } = {}) {
+  const { rows } = await query(
+    `SELECT ${PUBLIC_COLUMNS}
+     FROM properties
+     WHERE owner_id = $1
+       AND deleted_at IS NULL
+       AND ($2::varchar IS NULL OR status = $2::varchar)
+     ORDER BY created_at DESC, id DESC
+     LIMIT $3 OFFSET $4`,
+    [ownerId, status, limit, offset],
+  );
+
+  return rows.map(toProperty);
+}
+
+// Campos editables de HU-008 y su columna. owner_id y status nunca se actualizan aquí.
+const UPDATABLE_COLUMNS = {
+  title: 'title',
+  propertyTypeId: 'property_type_id',
+  description: 'description',
+  publicationPrice: 'publication_price',
+};
+
+/**
+ * HU-008
+ * Actualiza solo los campos enviados. La condición owner_id evita modificar propiedades
+ * ajenas aunque falle una validación previa, y las retiradas no se pueden editar.
+ * Devuelve null si ninguna fila cumplió las condiciones.
+ */
+async function updateProperty(propertyId, ownerId, fields) {
+  const entries = Object.entries(fields).filter(([key]) => UPDATABLE_COLUMNS[key]);
+
+  if (entries.length === 0) {
+    throw new Error('updateProperty requiere al menos un campo editable.');
+  }
+
+  const assignments = entries.map(([key], index) => `${UPDATABLE_COLUMNS[key]} = $${index + 3}`);
+  const values = [propertyId, ownerId, ...entries.map(([, value]) => value)];
+
+  const { rows } = await query(
+    `UPDATE properties
+     SET ${assignments.join(', ')}
+     WHERE id = $1
+       AND owner_id = $2
+       AND deleted_at IS NULL
+       AND status <> 'withdrawn'
+     RETURNING ${PUBLIC_COLUMNS}`,
+    values,
+  );
+
+  return toProperty(rows[0]);
+}
+
+/**
+ * HU-008
+ * Cambia el estado de publicación (active / inactive / withdrawn) y registra el cambio
+ * en property_status_history, todo en una sola sentencia (atómica).
+ * - Solo actúa si la propiedad es del vendedor y sigue en `previousStatus`
+ *   (evita pisar un cambio concurrente). Devuelve null si no se cumplió.
+ * - published_at se fija la primera vez que queda activa; withdrawn_at al retirarla.
+ * - El retiro es lógico: la fila y sus datos relacionados se conservan.
+ */
+async function changePropertyStatus({
+  propertyId,
+  ownerId,
+  previousStatus,
+  newStatus,
+  reason = null,
+}) {
+  const { rows } = await query(
+    `WITH updated AS (
+       UPDATE properties
+       SET status = $3::varchar,
+           published_at = CASE
+             WHEN $3::varchar = 'active' AND published_at IS NULL THEN CURRENT_TIMESTAMP
+             ELSE published_at
+           END,
+           withdrawn_at = CASE
+             WHEN $3::varchar = 'withdrawn' THEN CURRENT_TIMESTAMP
+             ELSE withdrawn_at
+           END
+       WHERE id = $1::bigint
+         AND owner_id = $2::bigint
+         AND status = $4::varchar
+         AND deleted_at IS NULL
+       RETURNING ${PUBLIC_COLUMNS}
+     ),
+     history AS (
+       INSERT INTO property_status_history (
+         property_id,
+         previous_status,
+         new_status,
+         changed_by,
+         reason
+       )
+       SELECT id, $4::varchar, $3::varchar, $2::bigint, $5::varchar
+       FROM updated
+     )
+     SELECT ${PUBLIC_COLUMNS} FROM updated`,
+    [propertyId, ownerId, newStatus, previousStatus, reason],
+  );
+
+  return toProperty(rows[0]);
+}
+
 module.exports = {
   isValidId,
 
@@ -436,4 +564,9 @@ module.exports = {
 
   findCharacteristicsByPropertyId,
   upsertCharacteristics,
+
+  countPropertiesByOwnerId,
+  findPropertiesByOwnerId,
+  updateProperty,
+  changePropertyStatus,
 };

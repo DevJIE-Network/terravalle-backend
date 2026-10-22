@@ -18,6 +18,16 @@ const serviceRepository = require(
 );
 
 const {
+  STATUS_TRANSITIONS,
+  updatePropertySchema,
+  toPropertyUpdate,
+  changeStatusSchema,
+  toStatusChange,
+  listPropertiesQuerySchema,
+  toListOptions,
+} = require('../schemas/property-management.schema');
+
+const {
   saveServicesSchema,
   uniqueServiceIds,
 } = require('../schemas/property-services.schema');
@@ -403,7 +413,242 @@ async function saveServices(req, res, next) {
   }
 }
 
+const WITHDRAWN_MESSAGE =
+  'La propiedad fue retirada y ya no se puede modificar.';
+
+const STATUS_CONFLICT_MESSAGE =
+  'El estado de la propiedad cambió. Actualiza la información e inténtalo de nuevo.';
+
+const withValidationErrors = (res, message, error) =>
+  res.status(400).json({
+    message,
+    errors: error.issues.map((issue) => ({
+      field: issue.path.join('.'),
+      message: issue.message,
+    })),
+  });
+
+/**
+ * HU-008
+ * Lista únicamente las propiedades del vendedor autenticado.
+ * Filtros opcionales: ?status=draft|active|inactive|withdrawn&page=1&limit=20
+ */
+async function listMyProperties(req, res, next) {
+  try {
+    const result = listPropertiesQuerySchema.safeParse(req.query);
+
+    if (!result.success) {
+      return withValidationErrors(res, 'Los filtros de consulta no son válidos.', result.error);
+    }
+
+    const { status, page, limit } = toListOptions(result.data);
+    const ownerId = String(req.auth.userId);
+
+    const [total, properties] = await Promise.all([
+      propertyRepository.countPropertiesByOwnerId(ownerId, status),
+      propertyRepository.findPropertiesByOwnerId(ownerId, {
+        status,
+        limit,
+        offset: (page - 1) * limit,
+      }),
+    ]);
+
+    return res.status(200).json({
+      properties,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * HU-008
+ * Consulta el detalle de una propiedad del vendedor.
+ */
+async function getMyProperty(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(
+      req.params.id,
+      req.auth.userId,
+      res,
+      NOT_OWNER_VIEW_MESSAGE,
+    );
+
+    if (!property) {
+      return undefined;
+    }
+
+    return res.status(200).json({ property });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * HU-008
+ * Edita los datos permitidos de una propiedad propia (edición parcial).
+ * El propietario y el estado no se pueden cambiar por esta vía.
+ */
+async function updateProperty(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req.params.id, req.auth.userId, res);
+
+    if (!property) {
+      return undefined;
+    }
+
+    if (property.status === 'withdrawn') {
+      return res.status(409).json({ message: WITHDRAWN_MESSAGE });
+    }
+
+    const result = updatePropertySchema.safeParse(req.body);
+
+    if (!result.success) {
+      return withValidationErrors(res, 'Los datos de la propiedad no son válidos.', result.error);
+    }
+
+    const fields = toPropertyUpdate(result.data);
+
+    if (fields.propertyTypeId !== undefined) {
+      const propertyType = await propertyRepository.findPropertyTypeById(fields.propertyTypeId);
+
+      if (!propertyType || !propertyType.isActive) {
+        return res.status(400).json({
+          message: 'El tipo de propiedad seleccionado no es válido.',
+        });
+      }
+    }
+
+    const updated = await propertyRepository.updateProperty(
+      property.id,
+      String(req.auth.userId),
+      fields,
+    );
+
+    if (!updated) {
+      return res.status(409).json({ message: STATUS_CONFLICT_MESSAGE });
+    }
+
+    return res.status(200).json({
+      message: 'Propiedad actualizada correctamente.',
+      property: updated,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * HU-008
+ * Activa o desactiva una propiedad propia. Las inactivas dejan de ser públicas.
+ * Cada cambio queda registrado en property_status_history.
+ */
+async function changePropertyStatus(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req.params.id, req.auth.userId, res);
+
+    if (!property) {
+      return undefined;
+    }
+
+    const result = changeStatusSchema.safeParse(req.body);
+
+    if (!result.success) {
+      return withValidationErrors(res, 'El cambio de estado no es válido.', result.error);
+    }
+
+    const { status: newStatus, reason } = toStatusChange(result.data);
+
+    if (property.status === 'withdrawn') {
+      return res.status(409).json({ message: WITHDRAWN_MESSAGE });
+    }
+
+    if (property.status === newStatus) {
+      return res.status(409).json({
+        message: `La propiedad ya está en estado "${newStatus}".`,
+      });
+    }
+
+    if (!STATUS_TRANSITIONS[property.status]?.includes(newStatus)) {
+      return res.status(409).json({
+        message: `No se puede cambiar una propiedad de "${property.status}" a "${newStatus}".`,
+      });
+    }
+
+    const updated = await propertyRepository.changePropertyStatus({
+      propertyId: property.id,
+      ownerId: String(req.auth.userId),
+      previousStatus: property.status,
+      newStatus,
+      reason,
+    });
+
+    if (!updated) {
+      return res.status(409).json({ message: STATUS_CONFLICT_MESSAGE });
+    }
+
+    return res.status(200).json({
+      message:
+        newStatus === 'active'
+          ? 'La propiedad está activa y visible en el catálogo.'
+          : 'La propiedad se desactivó y ya no aparece en el catálogo.',
+      property: updated,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
+ * HU-008
+ * Retira una propiedad propia. Es un retiro lógico: la información se conserva
+ * (status = 'withdrawn' y withdrawn_at) para trazabilidad; no se borra la fila.
+ */
+async function withdrawProperty(req, res, next) {
+  try {
+    const property = await loadOwnedProperty(req.params.id, req.auth.userId, res);
+
+    if (!property) {
+      return undefined;
+    }
+
+    if (property.status === 'withdrawn') {
+      return res.status(409).json({ message: WITHDRAWN_MESSAGE });
+    }
+
+    const updated = await propertyRepository.changePropertyStatus({
+      propertyId: property.id,
+      ownerId: String(req.auth.userId),
+      previousStatus: property.status,
+      newStatus: 'withdrawn',
+      reason: 'Retirada por el propietario',
+    });
+
+    if (!updated) {
+      return res.status(409).json({ message: STATUS_CONFLICT_MESSAGE });
+    }
+
+    return res.status(200).json({
+      message: 'La propiedad se retiró correctamente.',
+      property: updated,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
+  listMyProperties,
+  getMyProperty,
+  updateProperty,
+  changePropertyStatus,
+  withdrawProperty,
   createProperty,
   uploadPhotos,
   saveCharacteristics,

@@ -1,6 +1,11 @@
 const express = require('express');
 
 const {
+  listMyProperties,
+  getMyProperty,
+  updateProperty,
+  changePropertyStatus,
+  withdrawProperty,
   createProperty,
   uploadPhotos,
   saveCharacteristics,
@@ -27,6 +32,45 @@ router.post(
   '/',
   requireAuth,
   createProperty,
+);
+
+/**
+ * HU-008
+ * Panel del vendedor: consultar sus propiedades.
+ * (Se declaran antes de las rutas con :id para que "mine" no se confunda con un id.)
+ */
+router.get(
+  '/mine',
+  requireAuth,
+  listMyProperties,
+);
+
+router.get(
+  '/mine/:id',
+  requireAuth,
+  getMyProperty,
+);
+
+/**
+ * HU-008
+ * Editar datos permitidos, activar/desactivar y retirar una propiedad propia.
+ */
+router.patch(
+  '/:id',
+  requireAuth,
+  updateProperty,
+);
+
+router.patch(
+  '/:id/status',
+  requireAuth,
+  changePropertyStatus,
+);
+
+router.delete(
+  '/:id',
+  requireAuth,
+  withdrawProperty,
 );
 
 /**
