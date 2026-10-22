@@ -424,6 +424,457 @@ async function upsertCharacteristics(
     rows[0],
   );
 }
+const LOCATION_COLUMNS = `
+  id,
+  property_id,
+  street,
+  exterior_number,
+  interior_number,
+  neighborhood,
+  municipality,
+  state,
+  postal_code,
+  country,
+  latitude,
+  longitude,
+  formatted_address,
+  created_at,
+  updated_at
+`;
+function toLocation(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+
+    propertyId: String(
+      row.property_id,
+    ),
+
+    street: row.street,
+
+    exteriorNumber:
+      row.exterior_number,
+
+    interiorNumber:
+      row.interior_number,
+
+    neighborhood:
+      row.neighborhood,
+
+    municipality:
+      row.municipality,
+
+    state: row.state,
+
+    postalCode:
+      row.postal_code,
+
+    country: row.country,
+
+    latitude:
+      row.latitude === null
+        ? null
+        : Number(
+            row.latitude,
+          ),
+
+    longitude:
+      row.longitude === null
+        ? null
+        : Number(
+            row.longitude,
+          ),
+
+    formattedAddress:
+      row.formatted_address,
+
+    createdAt:
+      row.created_at,
+
+    updatedAt:
+      row.updated_at,
+  };
+}
+
+async function findLocationByPropertyId(
+  propertyId,
+) {
+  if (!isValidId(propertyId)) {
+    return null;
+  }
+
+  const { rows } = await query(
+    `SELECT ${LOCATION_COLUMNS}
+     FROM property_locations
+     WHERE property_id = $1
+     LIMIT 1`,
+    [propertyId],
+  );
+
+  return toLocation(
+    rows[0],
+  );
+}
+
+async function upsertLocation(
+  propertyId,
+  data,
+) {
+  const { rows } = await query(
+    `INSERT INTO property_locations (
+       property_id,
+       street,
+       exterior_number,
+       interior_number,
+       neighborhood,
+       municipality,
+       state,
+       postal_code,
+       country,
+       latitude,
+       longitude,
+       formatted_address
+     )
+     VALUES (
+       $1,
+       $2,
+       $3,
+       $4,
+       $5,
+       $6,
+       $7,
+       $8,
+       $9,
+       $10,
+       $11,
+       $12
+     )
+     ON CONFLICT (property_id)
+     DO UPDATE SET
+       street =
+         EXCLUDED.street,
+       exterior_number =
+         EXCLUDED.exterior_number,
+       interior_number =
+         EXCLUDED.interior_number,
+       neighborhood =
+         EXCLUDED.neighborhood,
+       municipality =
+         EXCLUDED.municipality,
+       state =
+         EXCLUDED.state,
+       postal_code =
+         EXCLUDED.postal_code,
+       country =
+         EXCLUDED.country,
+       latitude =
+         EXCLUDED.latitude,
+       longitude =
+         EXCLUDED.longitude,
+       formatted_address =
+         EXCLUDED.formatted_address
+     RETURNING ${LOCATION_COLUMNS}`,
+    [
+      propertyId,
+      data.street ?? null,
+      data.exteriorNumber ??
+        null,
+      data.interiorNumber ??
+        null,
+      data.neighborhood ?? null,
+      data.municipality ?? null,
+      data.state ?? null,
+      data.postalCode ?? null,
+      data.country ?? 'México',
+      data.latitude ?? null,
+      data.longitude ?? null,
+      data.formattedAddress ??
+        null,
+    ],
+  );
+
+  return toLocation(
+    rows[0],
+  );
+}
+
+async function findNearbyPlaceCategories() {
+  const { rows } = await query(
+    `SELECT
+       id,
+       name,
+       is_active
+     FROM nearby_place_categories
+     WHERE is_active = TRUE
+     ORDER BY name ASC`,
+  );
+
+  return rows.map(
+    (row) => ({
+      id: Number(row.id),
+      name: row.name,
+      isActive:
+        row.is_active,
+    }),
+  );
+}
+
+async function findNearbyPlaceCategoryById(
+  categoryId,
+) {
+  const { rows } = await query(
+    `SELECT
+       id,
+       name,
+       is_active
+     FROM nearby_place_categories
+     WHERE id = $1
+     LIMIT 1`,
+    [categoryId],
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return {
+    id: Number(rows[0].id),
+    name: rows[0].name,
+    isActive:
+      rows[0].is_active,
+  };
+}
+
+async function findNearbyPlacesByPropertyId(
+  propertyId,
+) {
+  const { rows } = await query(
+    `SELECT
+       np.id,
+       np.property_id,
+       np.category_id,
+       npc.name AS category_name,
+       np.name,
+       np.approximate_distance_m,
+       np.latitude,
+       np.longitude,
+       np.provider,
+       np.provider_place_id,
+       np.last_checked_at,
+       np.created_at
+     FROM nearby_places np
+     INNER JOIN nearby_place_categories npc
+       ON npc.id = np.category_id
+     WHERE np.property_id = $1
+     ORDER BY
+       np.approximate_distance_m
+         NULLS LAST,
+       np.name ASC`,
+    [propertyId],
+  );
+
+  return rows.map(
+    (row) => ({
+      id: String(row.id),
+
+      propertyId: String(
+        row.property_id,
+      ),
+
+      category: {
+        id: Number(
+          row.category_id,
+        ),
+
+        name:
+          row.category_name,
+      },
+
+      name: row.name,
+
+      approximateDistanceM:
+        row.approximate_distance_m ===
+        null
+          ? null
+          : Number(
+              row.approximate_distance_m,
+            ),
+
+      latitude:
+        row.latitude === null
+          ? null
+          : Number(
+              row.latitude,
+            ),
+
+      longitude:
+        row.longitude === null
+          ? null
+          : Number(
+              row.longitude,
+            ),
+
+      provider:
+        row.provider,
+
+      providerPlaceId:
+        row.provider_place_id,
+
+      lastCheckedAt:
+        row.last_checked_at,
+
+      createdAt:
+        row.created_at,
+    }),
+  );
+}
+
+async function createNearbyPlace({
+  propertyId,
+  categoryId,
+  name,
+  approximateDistanceM,
+  latitude,
+  longitude,
+}) {
+  const { rows } = await query(
+    `INSERT INTO nearby_places (
+       property_id,
+       category_id,
+       name,
+       approximate_distance_m,
+       latitude,
+       longitude
+     )
+     VALUES (
+       $1,
+       $2,
+       $3,
+       $4,
+       $5,
+       $6
+     )
+     RETURNING id`,
+    [
+      propertyId,
+      categoryId,
+      name,
+      approximateDistanceM ??
+        null,
+      latitude ?? null,
+      longitude ?? null,
+    ],
+  );
+
+  const placeId =
+    rows[0].id;
+
+  const { rows: placeRows } =
+    await query(
+      `SELECT
+         np.id,
+         np.property_id,
+         np.category_id,
+         npc.name AS category_name,
+         np.name,
+         np.approximate_distance_m,
+         np.latitude,
+         np.longitude,
+         np.provider,
+         np.provider_place_id,
+         np.last_checked_at,
+         np.created_at
+       FROM nearby_places np
+       INNER JOIN nearby_place_categories npc
+         ON npc.id = np.category_id
+       WHERE np.id = $1
+       LIMIT 1`,
+      [placeId],
+    );
+
+  const row =
+    placeRows[0];
+
+  return {
+    id: String(row.id),
+
+    propertyId: String(
+      row.property_id,
+    ),
+
+    category: {
+      id: Number(
+        row.category_id,
+      ),
+
+      name:
+        row.category_name,
+    },
+
+    name: row.name,
+
+    approximateDistanceM:
+      row.approximate_distance_m ===
+      null
+        ? null
+        : Number(
+            row.approximate_distance_m,
+          ),
+
+    latitude:
+      row.latitude === null
+        ? null
+        : Number(
+            row.latitude,
+          ),
+
+    longitude:
+      row.longitude === null
+        ? null
+        : Number(
+            row.longitude,
+          ),
+
+    provider:
+      row.provider,
+
+    providerPlaceId:
+      row.provider_place_id,
+
+    lastCheckedAt:
+      row.last_checked_at,
+
+    createdAt:
+      row.created_at,
+  };
+}
+
+async function deleteNearbyPlace(
+  propertyId,
+  placeId,
+) {
+  if (
+    !isValidId(propertyId) ||
+    !isValidId(placeId)
+  ) {
+    return false;
+  }
+
+  const result = await query(
+    `DELETE FROM nearby_places
+     WHERE id = $1
+       AND property_id = $2`,
+    [
+      placeId,
+      propertyId,
+    ],
+  );
+
+  return result.rowCount > 0;
+}
 
 module.exports = {
   isValidId,
@@ -436,4 +887,13 @@ module.exports = {
 
   findCharacteristicsByPropertyId,
   upsertCharacteristics,
+
+  findLocationByPropertyId,
+  upsertLocation,
+
+  findNearbyPlaceCategories,
+  findNearbyPlaceCategoryById,
+  findNearbyPlacesByPropertyId,
+  createNearbyPlace,
+  deleteNearbyPlace,
 };

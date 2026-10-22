@@ -19,6 +19,13 @@ const PROPERTY_NOT_FOUND_MESSAGE =
 const NOT_OWNER_MESSAGE =
   'No tienes permiso para modificar esta propiedad.';
 
+const {
+  saveLocationSchema,
+  createNearbyPlaceSchema,
+} = require(
+  '../schemas/property-location.schema',
+);
+
 /**
  * HU-004
  * Registra una nueva propiedad.
@@ -311,9 +318,283 @@ async function getCharacteristics(
   }
 }
 
+// HU-007: obtiene la ubicación
+// de una propiedad del usuario.
+async function getLocation(
+  req,
+  res,
+  next,
+) {
+  try {
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
+
+    if (!property) {
+      return undefined;
+    }
+
+    const location =
+      await propertyRepository.findLocationByPropertyId(
+        property.id,
+      );
+
+    return res.status(200).json({
+      location,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// HU-007: registra o actualiza
+// la ubicación principal.
+async function saveLocation(
+  req,
+  res,
+  next,
+) {
+  try {
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
+
+    if (!property) {
+      return undefined;
+    }
+
+    const result =
+      saveLocationSchema.safeParse(
+        req.body,
+      );
+
+    if (!result.success) {
+      return res.status(400).json({
+        message:
+          'La ubicación proporcionada no es válida.',
+
+        errors:
+          result.error.issues.map(
+            (issue) => ({
+              field:
+                issue.path.join(
+                  '.',
+                ),
+
+              message:
+                issue.message,
+            }),
+          ),
+      });
+    }
+
+    const location =
+      await propertyRepository.upsertLocation(
+        property.id,
+        result.data,
+      );
+
+    return res.status(200).json({
+      message:
+        'Ubicación guardada correctamente.',
+
+      location,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// HU-007: catálogo permitido
+// de puntos cercanos.
+async function getNearbyPlaceCategories(
+  _req,
+  res,
+  next,
+) {
+  try {
+    const categories =
+      await propertyRepository.findNearbyPlaceCategories();
+
+    return res.status(200).json({
+      categories,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// HU-007: consulta el entorno
+// registrado para la propiedad.
+async function getNearbyPlaces(
+  req,
+  res,
+  next,
+) {
+  try {
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
+
+    if (!property) {
+      return undefined;
+    }
+
+    const nearbyPlaces =
+      await propertyRepository.findNearbyPlacesByPropertyId(
+        property.id,
+      );
+
+    return res.status(200).json({
+      nearbyPlaces,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// HU-007: agrega manualmente
+// un punto de interés cercano.
+async function addNearbyPlace(
+  req,
+  res,
+  next,
+) {
+  try {
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
+
+    if (!property) {
+      return undefined;
+    }
+
+    const result =
+      createNearbyPlaceSchema.safeParse(
+        req.body,
+      );
+
+    if (!result.success) {
+      return res.status(400).json({
+        message:
+          'Los datos del punto cercano no son válidos.',
+
+        errors:
+          result.error.issues.map(
+            (issue) => ({
+              field:
+                issue.path.join(
+                  '.',
+                ),
+
+              message:
+                issue.message,
+            }),
+          ),
+      });
+    }
+
+    const category =
+      await propertyRepository.findNearbyPlaceCategoryById(
+        result.data.categoryId,
+      );
+
+    if (
+      !category ||
+      !category.isActive
+    ) {
+      return res.status(400).json({
+        message:
+          'La categoría seleccionada no es válida.',
+      });
+    }
+
+    const nearbyPlace =
+      await propertyRepository.createNearbyPlace(
+        {
+          propertyId:
+            property.id,
+
+          ...result.data,
+        },
+      );
+
+    return res.status(201).json({
+      message:
+        'Punto cercano registrado correctamente.',
+
+      nearbyPlace,
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+// HU-007: elimina un punto
+// cercano registrado manualmente.
+async function removeNearbyPlace(
+  req,
+  res,
+  next,
+) {
+  try {
+    const property =
+      await loadOwnedProperty(
+        req.params.id,
+        req.auth.userId,
+        res,
+      );
+
+    if (!property) {
+      return undefined;
+    }
+
+    const deleted =
+      await propertyRepository.deleteNearbyPlace(
+        property.id,
+        req.params.placeId,
+      );
+
+    if (!deleted) {
+      return res.status(404).json({
+        message:
+          'Punto cercano no encontrado.',
+      });
+    }
+
+    return res.status(200).json({
+      message:
+        'Punto cercano eliminado correctamente.',
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   createProperty,
   uploadPhotos,
+
   saveCharacteristics,
   getCharacteristics,
+
+  getLocation,
+  saveLocation,
+
+  getNearbyPlaceCategories,
+  getNearbyPlaces,
+  addNearbyPlace,
+  removeNearbyPlace,
 };
