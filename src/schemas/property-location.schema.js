@@ -169,6 +169,10 @@ const createNearbyPlaceSchema = z
       )
       .positive(
         'La categoría debe ser válida.',
+      )
+      .max(
+        32767,
+        'La categoría debe ser válida.',
       ),
 
     name: z
@@ -198,15 +202,27 @@ const createNearbyPlaceSchema = z
     latitude: optionalNumber(
       z.coerce
         .number()
-        .min(-90)
-        .max(90),
+        .min(
+          -90,
+          'La latitud debe estar entre -90 y 90.',
+        )
+        .max(
+          90,
+          'La latitud debe estar entre -90 y 90.',
+        ),
     ),
 
     longitude: optionalNumber(
       z.coerce
         .number()
-        .min(-180)
-        .max(180),
+        .min(
+          -180,
+          'La longitud debe estar entre -180 y 180.',
+        )
+        .max(
+          180,
+          'La longitud debe estar entre -180 y 180.',
+        ),
     ),
   })
   .strict()
@@ -224,6 +240,14 @@ const createNearbyPlaceSchema = z
         code:
           z.ZodIssueCode.custom,
         path: ['latitude'],
+        message:
+          'Las coordenadas del punto cercano deben enviarse completas.',
+      });
+
+      ctx.addIssue({
+        code:
+          z.ZodIssueCode.custom,
+        path: ['longitude'],
         message:
           'Las coordenadas del punto cercano deben enviarse completas.',
       });
