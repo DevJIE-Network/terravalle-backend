@@ -11,12 +11,31 @@ const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Orígenes del frontend autorizados para consumir la API.
+// Se pueden reemplazar con la variable CORS_ORIGINS (separados por coma).
+const DEFAULT_CORS_ORIGINS = [
+  'https://wonderful-pebble-0c19df21e.2.azurestaticapps.net',
+  'http://localhost:5173',
+  'http://localhost:4173',
+];
+
+const allowedOrigins = (process.env.CORS_ORIGINS || DEFAULT_CORS_ORIGINS.join(','))
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+const corsOptions = {
+  // Solicitudes sin cabecera Origin (curl, health checks de Azure) no aplican a CORS.
+  origin: (origin, callback) => {
+    callback(null, !origin || allowedOrigins.includes(origin));
+  },
+};
+
 app.disable('x-powered-by');
-app.use(cors());
+app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
 app.use('/api/properties', propertyRoutes);
 app.use('/api/services', serviceRoutes);
-app.use(express.json({ limit: '10kb' }));
 
 app.get('/', (_req, res) => {
   res.json({
@@ -79,7 +98,8 @@ async function startServer() {
 }
 
 if (require.main === module) {
-  startServer();
+  // startServer maneja sus propios errores; se ignora la promesa de forma explícita.
+  void startServer();
 }
 
 module.exports = { app, startServer };
