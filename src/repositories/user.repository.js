@@ -1,7 +1,12 @@
 const { query } = require('../config/database');
 
-const PUBLIC_COLUMNS = 'id, name, email, is_active, created_at, updated_at';
-const UPDATABLE_COLUMNS = { name: 'name', email: 'email' };
+const PUBLIC_COLUMNS = 'id, name, email, phone, contact_email, is_active, created_at, updated_at';
+const UPDATABLE_COLUMNS = {
+  name: 'name',
+  email: 'email',
+  phone: 'phone',
+  contactEmail: 'contact_email',
+};
 
 // Los id de PostgreSQL son BIGINT; solo se aceptan cadenas numéricas.
 function isValidId(id) {
@@ -16,6 +21,8 @@ function toUser(row) {
     id: String(row.id),
     name: row.name,
     email: row.email,
+    phone: row.phone ?? null,
+    contactEmail: row.contact_email ?? null,
     isActive: row.is_active,
     createdAt: row.created_at,
     updatedAt: row.updated_at,

@@ -1,32 +1,43 @@
 const express = require('express');
 
 const {
+  // HU-008
+  listMyProperties,
+  getMyProperty,
+  updateProperty,
+  changePropertyStatus,
+  withdrawProperty,
+
+  // HU-004
   createProperty,
+
+  // HU-020
   uploadPhotos,
+
+  // HU-005
   saveCharacteristics,
   getCharacteristics,
 
+  // HU-006
+  getServices,
+  saveServices,
+
+  // HU-007
   getLocation,
   saveLocation,
   getNearbyPlaceCategories,
   getNearbyPlaces,
   addNearbyPlace,
   removeNearbyPlace,
-} = require(
-  '../controllers/property.controller',
-);
+} = require('../controllers/property.controller');
 
 const {
   requireAuth,
-} = require(
-  '../middleware/auth.middleware',
-);
+} = require('../middleware/auth.middleware');
 
 const {
   uploadPropertyPhotos,
-} = require(
-  '../middleware/property-photo.middleware',
-);
+} = require('../middleware/property-photo.middleware');
 
 const router = express.Router();
 
@@ -41,14 +52,32 @@ router.post(
 );
 
 /**
+ * HU-008
+ * Consultar las propiedades
+ * del vendedor autenticado.
+ */
+router.get(
+  '/mine',
+  requireAuth,
+  listMyProperties,
+);
+
+/**
+ * HU-008
+ * Consultar una propiedad propia.
+ */
+router.get(
+  '/mine/:id',
+  requireAuth,
+  getMyProperty,
+);
+
+/**
  * HU-007
- * Consultar catálogo de categorías
+ * Catálogo de categorías
  * de puntos cercanos.
  *
- * IMPORTANTE:
- * Esta ruta va antes de las rutas /:id/...
- * para evitar que Express interprete
- * "nearby-place-categories" como un id.
+ * Debe ir antes de las rutas /:id.
  */
 router.get(
   '/nearby-place-categories',
@@ -57,8 +86,38 @@ router.get(
 );
 
 /**
+ * HU-008
+ * Editar una propiedad propia.
+ */
+router.patch(
+  '/:id',
+  requireAuth,
+  updateProperty,
+);
+
+/**
+ * HU-008
+ * Activar o desactivar propiedad.
+ */
+router.patch(
+  '/:id/status',
+  requireAuth,
+  changePropertyStatus,
+);
+
+/**
+ * HU-008
+ * Retirar una propiedad.
+ */
+router.delete(
+  '/:id',
+  requireAuth,
+  withdrawProperty,
+);
+
+/**
  * HU-020
- * Subir fotografías de una propiedad.
+ * Subir fotografías.
  */
 router.post(
   '/:propertyId/photos',
@@ -72,8 +131,7 @@ router.post(
 
 /**
  * HU-005
- * Consultar dimensiones y características
- * de una propiedad.
+ * Consultar características.
  */
 router.get(
   '/:id/characteristics',
@@ -83,8 +141,7 @@ router.get(
 
 /**
  * HU-005
- * Registrar o actualizar dimensiones
- * y características de una propiedad.
+ * Registrar o actualizar características.
  */
 router.put(
   '/:id/characteristics',
@@ -93,9 +150,28 @@ router.put(
 );
 
 /**
+ * HU-006
+ * Consultar servicios.
+ */
+router.get(
+  '/:id/services',
+  requireAuth,
+  getServices,
+);
+
+/**
+ * HU-006
+ * Registrar o actualizar servicios.
+ */
+router.put(
+  '/:id/services',
+  requireAuth,
+  saveServices,
+);
+
+/**
  * HU-007
- * Consultar la ubicación principal
- * de una propiedad.
+ * Consultar ubicación.
  */
 router.get(
   '/:id/location',
@@ -105,8 +181,7 @@ router.get(
 
 /**
  * HU-007
- * Registrar o actualizar la ubicación
- * principal de una propiedad.
+ * Registrar o actualizar ubicación.
  */
 router.put(
   '/:id/location',
@@ -116,8 +191,7 @@ router.put(
 
 /**
  * HU-007
- * Consultar los puntos de interés
- * cercanos de una propiedad.
+ * Consultar puntos cercanos.
  */
 router.get(
   '/:id/nearby-places',
@@ -127,8 +201,7 @@ router.get(
 
 /**
  * HU-007
- * Registrar manualmente un punto
- * de interés cercano.
+ * Registrar punto cercano.
  */
 router.post(
   '/:id/nearby-places',
@@ -138,8 +211,7 @@ router.post(
 
 /**
  * HU-007
- * Eliminar un punto de interés
- * cercano asociado a una propiedad.
+ * Eliminar punto cercano.
  */
 router.delete(
   '/:id/nearby-places/:placeId',
