@@ -45,6 +45,7 @@ terravalle-backend/
 │   ├── schemas/
 │   │   ├── auth.schema.js
 │   │   ├── property-characteristics.schema.js   # validación de HU-005
+│   │   ├── property-management.schema.js        # validación de HU-008
 │   │   └── user.schema.js
 │   ├── utils/
 │   │   └── jwt.js
@@ -52,6 +53,7 @@ terravalle-backend/
 ├── tests/
 │   ├── auth.test.js
 │   ├── property-characteristics.test.js
+│   ├── property-management.test.js
 │   └── user.test.js
 ├── .env
 ├── .env.example
@@ -211,6 +213,25 @@ Cuerpo de ejemplo para `PUT`:
 - Los datos son declarativos: no representan certificación de disponibilidad por parte de los proveedores.
 - Respuestas: `200` con `{ "services": [...] }` vigentes, `400` datos inválidos, `401` sin sesión válida, `403` si la propiedad es de otro vendedor y `404` si no existe.
 
+### Administrar mis propiedades (HU-008)
+
+Panel del vendedor: consultar, editar, activar/desactivar y retirar **solo sus propias propiedades**. Todas las rutas requieren `Authorization: Bearer <token>` y verifican que el usuario sea el propietario (`403` si la propiedad es de otro vendedor y `404` si no existe). No requieren cambios en la base de datos: usan `properties` y `property_status_history`.
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `GET` | `/api/properties/mine` | Lista únicamente las propiedades del usuario autenticado (incluye las retiradas). Filtros opcionales: `status`, `page` (por omisión 1) y `limit` (por omisión 20, máximo 100). |
+| `GET` | `/api/properties/mine/:id` | Detalle de una propiedad propia. |
+| `PATCH` | `/api/properties/:id` | Edición parcial de `title`, `propertyTypeId`, `description` y `publicationPrice`. |
+| `PATCH` | `/api/properties/:id/status` | Activa o desactiva la propiedad: `{ "status": "active" \| "inactive", "reason": "opcional" }`. |
+| `DELETE` | `/api/properties/:id` | Retira la propiedad (retiro lógico, sin borrar información). |
+
+- **Estados de publicación:** `draft` (al registrarla), `active`, `inactive` y `withdrawn`. Solo las `active` deben mostrarse a los compradores: cualquier catálogo público o búsqueda debe filtrar por `status = 'active'`.
+- **Cambios permitidos:** `draft → active`, `active → inactive` e `inactive → active`. Cualquier otro cambio, o repetir el estado actual, responde `409`. El retiro es definitivo: una propiedad `withdrawn` no se puede editar, reactivar ni volver a retirar.
+- **Retiro lógico:** se guarda `status = 'withdrawn'` y `withdrawn_at`; la fila, fotos, características y servicios se conservan para trazabilidad.
+- **Historial:** cada cambio de estado se registra en `property_status_history` (estado anterior, nuevo, quién lo hizo y motivo).
+- **Edición:** solo se actualizan los campos enviados; deben enviarse al menos uno. El propietario (`owner_id`) y el estado no se pueden cambiar por `PATCH /:id`. `description` y `publicationPrice` aceptan `null` o texto vacío para quitarlos. El título lleva 3 a 150 caracteres, la descripción máximo 3000 y el precio es ≥ 0 con máximo 2 decimales. `propertyTypeId` debe ser un tipo existente y activo.
+- Respuestas: `200` correcto, `400` datos o filtros inválidos (detalle por campo en `errors`), `401` sin sesión, `403` propiedad ajena, `404` inexistente y `409` cambio de estado no permitido o propiedad modificada mientras tanto.
+
 ## Calidad de código (SonarQube Cloud)
 
 El análisis estático se ejecuta automáticamente con **SonarQube Cloud** (plan gratuito para repositorios públicos) mediante GitHub Actions.
@@ -224,7 +245,7 @@ El análisis estático se ejecuta automáticamente con **SonarQube Cloud** (plan
 
 1. Entrar a [sonarcloud.io](https://sonarcloud.io) con la cuenta de GitHub e importar la organización `DevJIE-Network`.
 2. Crear el proyecto `terravalle-backend` (plan Free) y en **Administration → Analysis Method** desactivar *Automatic Analysis*.
-3. Generar un token en **My Account → Security**.
+3. Generar un token en **My Account → Access tokens**.
 4. En GitHub: **Settings → Secrets and variables → Actions** → secreto `SONAR_TOKEN` con ese token. El token nunca se guarda en el código.
 
 ### Ejecutar localmente las pruebas con cobertura
