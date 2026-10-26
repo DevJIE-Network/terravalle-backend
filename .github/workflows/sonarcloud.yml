@@ -1,0 +1,47 @@
+# Análisis automático de calidad de código con SonarQube Cloud.
+# Se ejecuta en cada push a ramas principales y de sprint, y en cada Pull Request.
+name: Calidad de código (SonarQube Cloud)
+
+on:
+  push:
+    branches:
+      - main
+      - developer
+      - release
+      - 'sprint*'
+  pull_request:
+    types: [opened, synchronize, reopened]
+  workflow_dispatch:
+
+jobs:
+  sonarqube:
+    name: Pruebas y análisis
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Descargar el código
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          # Historial completo para que Sonar calcule correctamente el código nuevo.
+          fetch-depth: 0
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5
+        with:
+          node-version: '22.x'
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci --ignore-scripts
+
+      - name: Pruebas con cobertura
+        run: npm run test:coverage
+
+      - name: Análisis de SonarQube Cloud
+        uses: SonarSource/sonarqube-scan-action@c7ee0f9df90b7aa20e8dcf9695dcfe2e7da5b4f2 # v7
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          SONAR_HOST_URL: https://sonarcloud.io

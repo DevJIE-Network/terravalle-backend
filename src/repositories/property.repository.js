@@ -424,6 +424,585 @@ async function upsertCharacteristics(
     rows[0],
   );
 }
+const LOCATION_COLUMNS = `
+  id,
+  property_id,
+  street,
+  exterior_number,
+  interior_number,
+  neighborhood,
+  municipality,
+  state,
+  postal_code,
+  country,
+  latitude,
+  longitude,
+  formatted_address,
+  created_at,
+  updated_at
+`;
+function toLocation(row) {
+  if (!row) {
+    return null;
+  }
+
+  return {
+    id: String(row.id),
+
+    propertyId: String(
+      row.property_id,
+    ),
+
+    street: row.street,
+
+    exteriorNumber:
+      row.exterior_number,
+
+    interiorNumber:
+      row.interior_number,
+
+    neighborhood:
+      row.neighborhood,
+
+    municipality:
+      row.municipality,
+
+    state: row.state,
+
+    postalCode:
+      row.postal_code,
+
+    country: row.country,
+
+    latitude:
+      row.latitude === null
+        ? null
+        : Number(
+            row.latitude,
+          ),
+
+    longitude:
+      row.longitude === null
+        ? null
+        : Number(
+            row.longitude,
+          ),
+
+    formattedAddress:
+      row.formatted_address,
+
+    createdAt:
+      row.created_at,
+
+    updatedAt:
+      row.updated_at,
+  };
+}
+
+async function findLocationByPropertyId(
+  propertyId,
+) {
+  if (!isValidId(propertyId)) {
+    return null;
+  }
+
+  const { rows } = await query(
+    `SELECT ${LOCATION_COLUMNS}
+     FROM property_locations
+     WHERE property_id = $1
+     LIMIT 1`,
+    [propertyId],
+  );
+
+  return toLocation(
+    rows[0],
+  );
+}
+
+async function upsertLocation(
+  propertyId,
+  data,
+) {
+  const { rows } = await query(
+    `INSERT INTO property_locations (
+       property_id,
+       street,
+       exterior_number,
+       interior_number,
+       neighborhood,
+       municipality,
+       state,
+       postal_code,
+       country,
+       latitude,
+       longitude,
+       formatted_address
+     )
+     VALUES (
+       $1,
+       $2,
+       $3,
+       $4,
+       $5,
+       $6,
+       $7,
+       $8,
+       $9,
+       $10,
+       $11,
+       $12
+     )
+     ON CONFLICT (property_id)
+     DO UPDATE SET
+       street =
+         EXCLUDED.street,
+       exterior_number =
+         EXCLUDED.exterior_number,
+       interior_number =
+         EXCLUDED.interior_number,
+       neighborhood =
+         EXCLUDED.neighborhood,
+       municipality =
+         EXCLUDED.municipality,
+       state =
+         EXCLUDED.state,
+       postal_code =
+         EXCLUDED.postal_code,
+       country =
+         EXCLUDED.country,
+       latitude =
+         EXCLUDED.latitude,
+       longitude =
+         EXCLUDED.longitude,
+       formatted_address =
+         EXCLUDED.formatted_address
+     RETURNING ${LOCATION_COLUMNS}`,
+    [
+      propertyId,
+      data.street ?? null,
+      data.exteriorNumber ??
+        null,
+      data.interiorNumber ??
+        null,
+      data.neighborhood ?? null,
+      data.municipality ?? null,
+      data.state ?? null,
+      data.postalCode ?? null,
+      data.country ?? 'México',
+      data.latitude ?? null,
+      data.longitude ?? null,
+      data.formattedAddress ??
+        null,
+    ],
+  );
+
+  return toLocation(
+    rows[0],
+  );
+}
+
+async function findNearbyPlaceCategories() {
+  const { rows } = await query(
+    `SELECT
+       id,
+       name,
+       is_active
+     FROM nearby_place_categories
+     WHERE is_active = TRUE
+     ORDER BY name ASC`,
+  );
+
+  return rows.map(
+    (row) => ({
+      id: Number(row.id),
+      name: row.name,
+      isActive:
+        row.is_active,
+    }),
+  );
+}
+
+async function findNearbyPlaceCategoryById(
+  categoryId,
+) {
+  const { rows } = await query(
+    `SELECT
+       id,
+       name,
+       is_active
+     FROM nearby_place_categories
+     WHERE id = $1
+     LIMIT 1`,
+    [categoryId],
+  );
+
+  if (!rows[0]) {
+    return null;
+  }
+
+  return {
+    id: Number(rows[0].id),
+    name: rows[0].name,
+    isActive:
+      rows[0].is_active,
+  };
+}
+
+async function findNearbyPlacesByPropertyId(
+  propertyId,
+) {
+  const { rows } = await query(
+    `SELECT
+       np.id,
+       np.property_id,
+       np.category_id,
+       npc.name AS category_name,
+       np.name,
+       np.approximate_distance_m,
+       np.latitude,
+       np.longitude,
+       np.provider,
+       np.provider_place_id,
+       np.last_checked_at,
+       np.created_at
+     FROM nearby_places np
+     INNER JOIN nearby_place_categories npc
+       ON npc.id = np.category_id
+     WHERE np.property_id = $1
+     ORDER BY
+       np.approximate_distance_m
+         NULLS LAST,
+       np.name ASC`,
+    [propertyId],
+  );
+
+  return rows.map(
+    (row) => ({
+      id: String(row.id),
+
+      propertyId: String(
+        row.property_id,
+      ),
+
+      category: {
+        id: Number(
+          row.category_id,
+        ),
+
+        name:
+          row.category_name,
+      },
+
+      name: row.name,
+
+      approximateDistanceM:
+        row.approximate_distance_m ===
+        null
+          ? null
+          : Number(
+              row.approximate_distance_m,
+            ),
+
+      latitude:
+        row.latitude === null
+          ? null
+          : Number(
+              row.latitude,
+            ),
+
+      longitude:
+        row.longitude === null
+          ? null
+          : Number(
+              row.longitude,
+            ),
+
+      provider:
+        row.provider,
+
+      providerPlaceId:
+        row.provider_place_id,
+
+      lastCheckedAt:
+        row.last_checked_at,
+
+      createdAt:
+        row.created_at,
+    }),
+  );
+}
+
+async function createNearbyPlace({
+  propertyId,
+  categoryId,
+  name,
+  approximateDistanceM,
+  latitude,
+  longitude,
+}) {
+  const { rows } = await query(
+    `INSERT INTO nearby_places (
+       property_id,
+       category_id,
+       name,
+       approximate_distance_m,
+       latitude,
+       longitude
+     )
+     VALUES (
+       $1,
+       $2,
+       $3,
+       $4,
+       $5,
+       $6
+     )
+     RETURNING id`,
+    [
+      propertyId,
+      categoryId,
+      name,
+      approximateDistanceM ??
+        null,
+      latitude ?? null,
+      longitude ?? null,
+    ],
+  );
+
+  const placeId =
+    rows[0].id;
+
+  const { rows: placeRows } =
+    await query(
+      `SELECT
+         np.id,
+         np.property_id,
+         np.category_id,
+         npc.name AS category_name,
+         np.name,
+         np.approximate_distance_m,
+         np.latitude,
+         np.longitude,
+         np.provider,
+         np.provider_place_id,
+         np.last_checked_at,
+         np.created_at
+       FROM nearby_places np
+       INNER JOIN nearby_place_categories npc
+         ON npc.id = np.category_id
+       WHERE np.id = $1
+       LIMIT 1`,
+      [placeId],
+    );
+
+  const row =
+    placeRows[0];
+
+  return {
+    id: String(row.id),
+
+    propertyId: String(
+      row.property_id,
+    ),
+
+    category: {
+      id: Number(
+        row.category_id,
+      ),
+
+      name:
+        row.category_name,
+    },
+
+    name: row.name,
+
+    approximateDistanceM:
+      row.approximate_distance_m ===
+      null
+        ? null
+        : Number(
+            row.approximate_distance_m,
+          ),
+
+    latitude:
+      row.latitude === null
+        ? null
+        : Number(
+            row.latitude,
+          ),
+
+    longitude:
+      row.longitude === null
+        ? null
+        : Number(
+            row.longitude,
+          ),
+
+    provider:
+      row.provider,
+
+    providerPlaceId:
+      row.provider_place_id,
+
+    lastCheckedAt:
+      row.last_checked_at,
+
+    createdAt:
+      row.created_at,
+  };
+}
+
+async function deleteNearbyPlace(
+  propertyId,
+  placeId,
+) {
+  if (
+    !isValidId(propertyId) ||
+    !isValidId(placeId)
+  ) {
+    return false;
+  }
+
+  const result = await query(
+    `DELETE FROM nearby_places
+     WHERE id = $1
+       AND property_id = $2`,
+    [
+      placeId,
+      propertyId,
+    ],
+  );
+
+  return result.rowCount > 0;
+}
+
+/**
+ * HU-008
+ * Cuenta las propiedades del vendedor (sin las eliminadas lógicamente),
+ * opcionalmente filtradas por estado.
+ */
+async function countPropertiesByOwnerId(ownerId, status = null) {
+  const { rows } = await query(
+    `SELECT COUNT(*) AS total
+     FROM properties
+     WHERE owner_id = $1
+       AND deleted_at IS NULL
+       AND ($2::varchar IS NULL OR status = $2::varchar)`,
+    [ownerId, status],
+  );
+
+  return Number(rows[0].total);
+}
+
+/**
+ * HU-008
+ * Lista únicamente las propiedades del vendedor, de la más reciente a la más antigua.
+ * Incluye las retiradas para conservar la trazabilidad.
+ */
+async function findPropertiesByOwnerId(ownerId, { status = null, limit = 20, offset = 0 } = {}) {
+  const { rows } = await query(
+    `SELECT ${PUBLIC_COLUMNS}
+     FROM properties
+     WHERE owner_id = $1
+       AND deleted_at IS NULL
+       AND ($2::varchar IS NULL OR status = $2::varchar)
+     ORDER BY created_at DESC, id DESC
+     LIMIT $3 OFFSET $4`,
+    [ownerId, status, limit, offset],
+  );
+
+  return rows.map(toProperty);
+}
+
+// Campos editables de HU-008 y su columna. owner_id y status nunca se actualizan aquí.
+const UPDATABLE_COLUMNS = {
+  title: 'title',
+  propertyTypeId: 'property_type_id',
+  description: 'description',
+  publicationPrice: 'publication_price',
+};
+
+/**
+ * HU-008
+ * Actualiza solo los campos enviados. La condición owner_id evita modificar propiedades
+ * ajenas aunque falle una validación previa, y las retiradas no se pueden editar.
+ * Devuelve null si ninguna fila cumplió las condiciones.
+ */
+async function updateProperty(propertyId, ownerId, fields) {
+  const entries = Object.entries(fields).filter(([key]) => UPDATABLE_COLUMNS[key]);
+
+  if (entries.length === 0) {
+    throw new Error('updateProperty requiere al menos un campo editable.');
+  }
+
+  const assignments = entries.map(([key], index) => `${UPDATABLE_COLUMNS[key]} = $${index + 3}`);
+  const values = [propertyId, ownerId, ...entries.map(([, value]) => value)];
+
+  const { rows } = await query(
+    `UPDATE properties
+     SET ${assignments.join(', ')}
+     WHERE id = $1
+       AND owner_id = $2
+       AND deleted_at IS NULL
+       AND status <> 'withdrawn'
+     RETURNING ${PUBLIC_COLUMNS}`,
+    values,
+  );
+
+  return toProperty(rows[0]);
+}
+
+/**
+ * HU-008
+ * Cambia el estado de publicación (active / inactive / withdrawn) y registra el cambio
+ * en property_status_history, todo en una sola sentencia (atómica).
+ * - Solo actúa si la propiedad es del vendedor y sigue en `previousStatus`
+ *   (evita pisar un cambio concurrente). Devuelve null si no se cumplió.
+ * - published_at se fija la primera vez que queda activa; withdrawn_at al retirarla.
+ * - El retiro es lógico: la fila y sus datos relacionados se conservan.
+ */
+async function changePropertyStatus({
+  propertyId,
+  ownerId,
+  previousStatus,
+  newStatus,
+  reason = null,
+}) {
+  const { rows } = await query(
+    `WITH updated AS (
+       UPDATE properties
+       SET status = $3::varchar,
+           published_at = CASE
+             WHEN $3::varchar = 'active' AND published_at IS NULL THEN CURRENT_TIMESTAMP
+             ELSE published_at
+           END,
+           withdrawn_at = CASE
+             WHEN $3::varchar = 'withdrawn' THEN CURRENT_TIMESTAMP
+             ELSE withdrawn_at
+           END
+       WHERE id = $1::bigint
+         AND owner_id = $2::bigint
+         AND status = $4::varchar
+         AND deleted_at IS NULL
+       RETURNING ${PUBLIC_COLUMNS}
+     ),
+     history AS (
+       INSERT INTO property_status_history (
+         property_id,
+         previous_status,
+         new_status,
+         changed_by,
+         reason
+       )
+       SELECT id, $4::varchar, $3::varchar, $2::bigint, $5::varchar
+       FROM updated
+     )
+     SELECT ${PUBLIC_COLUMNS} FROM updated`,
+    [propertyId, ownerId, newStatus, previousStatus, reason],
+  );
+
+  return toProperty(rows[0]);
+}
 
 module.exports = {
   isValidId,
@@ -436,4 +1015,20 @@ module.exports = {
 
   findCharacteristicsByPropertyId,
   upsertCharacteristics,
+
+  // HU-007
+  findLocationByPropertyId,
+  upsertLocation,
+
+  findNearbyPlaceCategories,
+  findNearbyPlaceCategoryById,
+  findNearbyPlacesByPropertyId,
+  createNearbyPlace,
+  deleteNearbyPlace,
+
+  // HU-008
+  countPropertiesByOwnerId,
+  findPropertiesByOwnerId,
+  updateProperty,
+  changePropertyStatus,
 };
