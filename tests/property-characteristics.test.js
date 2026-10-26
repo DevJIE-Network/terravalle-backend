@@ -329,4 +329,5 @@ test('HU-005 consultar características de otro vendedor devuelve 403', async (t
   await getCharacteristics(mockReq(), res, () => {});
 
   assert.equal(res.statusCode, 403);
+  assert.equal(res.body.message, 'No tienes permiso para consultar esta propiedad.');
 });

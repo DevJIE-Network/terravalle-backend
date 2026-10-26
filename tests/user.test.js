@@ -12,8 +12,23 @@ const OWNER = {
   id: '101',
   name: 'Usuario TerraValle',
   email: 'usuario@example.com',
+  phone: '7731234567',
+  contactEmail: null,
   isActive: true,
+  createdAt: '2026-10-01T12:00:00.000Z',
 };
+
+// Perfil público que devuelve la API (sin isActive ni datos internos).
+function profileOf(user) {
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    phone: user.phone ?? null,
+    contactEmail: user.contactEmail ?? null,
+    createdAt: user.createdAt ?? null,
+  };
+}
 const OTHER_ID = '202';
 
 let baseUrl;
@@ -68,7 +83,7 @@ test('HU-003 CA1 el usuario autenticado consulta solo su perfil', async (t) => {
 
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
-    user: { id: OWNER.id, name: OWNER.name, email: OWNER.email },
+    user: profileOf(OWNER),
   });
 });
 
@@ -107,7 +122,7 @@ test('HU-003 CA2 actualiza campos permitidos y devuelve la información vigente'
   assert.equal(response.status, 200);
   assert.deepEqual(await response.json(), {
     message: 'Perfil actualizado correctamente.',
-    user: { id: OWNER.id, name: 'Nombre Actualizado', email: 'nuevo@example.com' },
+    user: profileOf({ ...OWNER, name: 'Nombre Actualizado', email: 'nuevo@example.com' }),
   });
 
   const [id, changes] = update.mock.calls[0].arguments;
@@ -206,5 +221,60 @@ test('HU-003 CA4 deniega consultar o modificar otra cuenta', async (t) => {
   assert.deepEqual(await patchResponse.json(), {
     message: 'No tienes permiso para acceder a otra cuenta.',
   });
+  assert.equal(update.mock.callCount(), 0);
+});
+
+test('HU-019 el esquema valida teléfono y correo de contacto', () => {
+  const parse = (data) => updateProfileSchema.safeParse(data);
+
+  assert.equal(parse({ phone: '773 123 4567' }).success, true);
+  assert.equal(parse({ phone: '+52 773-123-4567' }).success, true);
+  assert.equal(parse({ phone: '12345' }).success, false);
+  assert.equal(parse({ phone: 'abc1234567' }).success, false);
+  assert.equal(parse({ contactEmail: 'ventas@example.com' }).success, true);
+  assert.equal(parse({ contactEmail: 'no-es-correo' }).success, false);
+
+  // Vacío significa "borrar el dato".
+  assert.deepEqual(parse({ phone: '', contactEmail: '  ' }).data, { phone: null, contactEmail: null });
+});
+
+test('HU-019 actualiza los datos de contacto', async (t) => {
+  mockAuthenticatedUser(t);
+  const update = t.mock.method(userRepository, 'updateProfile', async (id, changes) => ({
+    ...OWNER,
+    ...changes,
+    id,
+  }));
+
+  const response = await call('/api/users/me', {
+    method: 'PATCH',
+    token: tokenFor(OWNER),
+    body: { phone: ' 773 765 4321 ', contactEmail: ' VENTAS@EXAMPLE.COM ' },
+  });
+
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.user.phone, '773 765 4321');
+  assert.equal(body.user.contactEmail, 'ventas@example.com');
+  assert.deepEqual(update.mock.calls[0].arguments[1], {
+    phone: '773 765 4321',
+    contactEmail: 'ventas@example.com',
+  });
+});
+
+test('HU-019 rechaza un teléfono inválido sin tocar la base de datos', async (t) => {
+  mockAuthenticatedUser(t);
+  const update = t.mock.method(userRepository, 'updateProfile', async () => {
+    throw new Error('No debe actualizar con datos inválidos.');
+  });
+
+  const response = await call('/api/users/me', {
+    method: 'PATCH',
+    token: tokenFor(OWNER),
+    body: { phone: '123' },
+  });
+
+  assert.equal(response.status, 400);
+  assert.deepEqual((await response.json()).errors.map((error) => error.field), ['phone']);
   assert.equal(update.mock.callCount(), 0);
 });

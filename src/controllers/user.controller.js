@@ -9,6 +9,9 @@ function toProfile(user) {
     id: user.id,
     name: user.name,
     email: user.email,
+    phone: user.phone ?? null,
+    contactEmail: user.contactEmail ?? null,
+    createdAt: user.createdAt ?? null,
   };
 }
 
