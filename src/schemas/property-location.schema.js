@@ -39,6 +39,42 @@ function optionalNumber(schema) {
   );
 }
 
+// Coordenadas compartidas por la ubicación de la propiedad y los puntos cercanos.
+const latitudeSchema = optionalNumber(
+  z.coerce
+    .number()
+    .min(-90, 'La latitud debe estar entre -90 y 90.')
+    .max(90, 'La latitud debe estar entre -90 y 90.'),
+);
+
+const longitudeSchema = optionalNumber(
+  z.coerce
+    .number()
+    .min(-180, 'La longitud debe estar entre -180 y 180.')
+    .max(180, 'La longitud debe estar entre -180 y 180.'),
+);
+
+/**
+ * Exige que latitud y longitud se envíen juntas.
+ * @returns {boolean} true si se enviaron ambas coordenadas.
+ */
+function validateCoordinatePair(data, ctx, message) {
+  const hasLatitude = data.latitude !== undefined;
+  const hasLongitude = data.longitude !== undefined;
+
+  if (hasLatitude !== hasLongitude) {
+    for (const field of ['latitude', 'longitude']) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [field],
+        message,
+      });
+    }
+  }
+
+  return hasLatitude && hasLongitude;
+}
+
 const saveLocationSchema = z
   .object({
     street: optionalText(150),
@@ -71,66 +107,20 @@ const saveLocationSchema = z
         .default('México'),
     ),
 
-    latitude: optionalNumber(
-      z.coerce
-        .number()
-        .min(
-          -90,
-          'La latitud debe estar entre -90 y 90.',
-        )
-        .max(
-          90,
-          'La latitud debe estar entre -90 y 90.',
-        ),
-    ),
+    latitude: latitudeSchema,
 
-    longitude: optionalNumber(
-      z.coerce
-        .number()
-        .min(
-          -180,
-          'La longitud debe estar entre -180 y 180.',
-        )
-        .max(
-          180,
-          'La longitud debe estar entre -180 y 180.',
-        ),
-    ),
+    longitude: longitudeSchema,
 
     formattedAddress:
       optionalText(500),
   })
   .strict()
   .superRefine((data, ctx) => {
-    const hasLatitude =
-      data.latitude !== undefined;
-
-    const hasLongitude =
-      data.longitude !== undefined;
-
-    if (
-      hasLatitude !== hasLongitude
-    ) {
-      ctx.addIssue({
-        code:
-          z.ZodIssueCode.custom,
-        path: ['latitude'],
-        message:
-          'La latitud y longitud deben enviarse juntas.',
-      });
-
-      ctx.addIssue({
-        code:
-          z.ZodIssueCode.custom,
-        path: ['longitude'],
-        message:
-          'La latitud y longitud deben enviarse juntas.',
-      });
-    }
-
-    const hasCoordinates =
-      hasLatitude &&
-      hasLongitude;
+    const hasCoordinates = validateCoordinatePair(
+      data,
+      ctx,
+      'La latitud y longitud deben enviarse juntas.',
+    );
 
     const hasStructuredAddress =
       Boolean(
@@ -199,62 +189,20 @@ const createNearbyPlaceSchema = z
           ),
       ),
 
-    latitude: optionalNumber(
-      z.coerce
-        .number()
-        .min(
-          -90,
-          'La latitud debe estar entre -90 y 90.',
-        )
-        .max(
-          90,
-          'La latitud debe estar entre -90 y 90.',
-        ),
-    ),
+    latitude: latitudeSchema,
 
-    longitude: optionalNumber(
-      z.coerce
-        .number()
-        .min(
-          -180,
-          'La longitud debe estar entre -180 y 180.',
-        )
-        .max(
-          180,
-          'La longitud debe estar entre -180 y 180.',
-        ),
-    ),
+    longitude: longitudeSchema,
   })
   .strict()
   .superRefine((data, ctx) => {
-    const hasLatitude =
-      data.latitude !== undefined;
-
-    const hasLongitude =
-      data.longitude !== undefined;
-
-    if (
-      hasLatitude !== hasLongitude
-    ) {
-      ctx.addIssue({
-        code:
-          z.ZodIssueCode.custom,
-        path: ['latitude'],
-        message:
-          'Las coordenadas del punto cercano deben enviarse completas.',
-      });
-
-      ctx.addIssue({
-        code:
-          z.ZodIssueCode.custom,
-        path: ['longitude'],
-        message:
-          'Las coordenadas del punto cercano deben enviarse completas.',
-      });
-    }
+    validateCoordinatePair(
+      data,
+      ctx,
+      'Las coordenadas del punto cercano deben enviarse completas.',
+    );
   });
 
 module.exports = {
   saveLocationSchema,
   createNearbyPlaceSchema,
-};
+};
