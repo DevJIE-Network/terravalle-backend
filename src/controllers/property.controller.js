@@ -1260,4 +1260,8 @@ module.exports = {
   getNearbyPlaces,
   addNearbyPlace,
   removeNearbyPlace,
-};
+
+  // Compartidos con HU-009
+  loadOwnedProperty,
+  NOT_OWNER_VIEW_MESSAGE,
+};

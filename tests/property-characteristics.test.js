@@ -26,6 +26,7 @@ const WITH_CONSTRUCTION = {
   parkingSpaces: 1,
   constructionAge: 5,
   generalCondition: 'bueno',
+  constructionQuality: 'media',
 };
 
 const parse = (body) => saveCharacteristicsSchema.safeParse(body);
@@ -102,6 +103,26 @@ test('HU-005 CA3 con construcción acepta los datos completos y los conserva', (
   const result = parse(WITH_CONSTRUCTION);
   assert.equal(result.success, true);
   assert.deepEqual(toCharacteristicsRecord(result.data), WITH_CONSTRUCTION);
+});
+
+test('HU-005 la calidad de la construcción es opcional y se valida contra el catálogo', () => {
+  const { constructionQuality, ...withoutQuality } = WITH_CONSTRUCTION;
+  assert.equal(constructionQuality, 'media');
+
+  const sinCalidad = parse(withoutQuality);
+  assert.equal(sinCalidad.success, true);
+  assert.equal(toCharacteristicsRecord(sinCalidad.data).constructionQuality, null);
+
+  for (const quality of ['economica', 'media', 'residencial', 'lujo']) {
+    const result = parse({ ...WITH_CONSTRUCTION, constructionQuality: quality });
+    assert.equal(toCharacteristicsRecord(result.data).constructionQuality, quality);
+  }
+
+  const invalida = parse({ ...WITH_CONSTRUCTION, constructionQuality: 'premium' });
+  assert.deepEqual(fieldsWithError(invalida), ['constructionQuality']);
+
+  const sinConstruccion = parse({ ...LAND_ONLY, constructionQuality: 'media' });
+  assert.deepEqual(fieldsWithError(sinConstruccion), ['constructionQuality']);
 });
 
 test('HU-005 CA3 con construcción exige los datos obligatorios', () => {

@@ -167,7 +167,8 @@ Cuerpo de ejemplo para una propiedad **con** construcción:
   "floors": 2,
   "parkingSpaces": 1,
   "constructionAge": 5,
-  "generalCondition": "bueno"
+  "generalCondition": "bueno",
+  "constructionQuality": "media"
 }
 ```
 
@@ -185,6 +186,7 @@ Para un terreno **sin** construcción basta con `{ "landArea": 200, "frontage": 
 | `constructionAge` | Obligatorio con construcción: años, entero ≥ 0 (0 = nueva). |
 | `generalCondition` | Obligatorio con construcción: `excelente`, `bueno`, `regular` o `malo`. |
 | `parkingSpaces` | Opcional con construcción: entero ≥ 0 (si se omite se guarda 0). |
+| `constructionQuality` | Opcional con construcción: `economica`, `media`, `residencial` o `lujo`. Mejora la precisión de la estimación (HU-009). Requiere la migración 006. |
 
 - Con `hasConstruction: false` no se exige ningún campo de edificación y, si se envía alguno con valor, se rechaza con `400`. Los valores vacíos o `null` se tratan como ausentes.
 - Los datos son declarados por el vendedor: son informativos y no sustituyen documentación oficial.
@@ -232,6 +234,56 @@ Panel del vendedor: consultar, editar, activar/desactivar y retirar **solo sus p
 - **Edición:** solo se actualizan los campos enviados; deben enviarse al menos uno. El propietario (`owner_id`) y el estado no se pueden cambiar por `PATCH /:id`. `description` y `publicationPrice` aceptan `null` o texto vacío para quitarlos. El título lleva 3 a 150 caracteres, la descripción máximo 3000 y el precio es ≥ 0 con máximo 2 decimales. `propertyTypeId` debe ser un tipo existente y activo.
 - Respuestas: `200` correcto, `400` datos o filtros inválidos (detalle por campo en `errors`), `401` sin sesión, `403` propiedad ajena, `404` inexistente y `409` cambio de estado no permitido o propiedad modificada mientras tanto.
 
+### Estimación orientativa del valor con IA (HU-009)
+
+El vendedor solicita una **estimación orientativa** del valor de su propiedad. Requiere `Authorization: Bearer <token>` y solo funciona sobre propiedades propias (`403` si es de otro vendedor, `404` si no existe, `409` si está retirada).
+
+> **Requiere las migraciones 005 y 006** (`npm run migrate:up`) antes de desplegar.
+
+| Método | Ruta | Descripción |
+| --- | --- | --- |
+| `POST` | `/api/properties/:id/estimations` | Calcula y guarda una estimación. `201` con el valor, el rango, la explicación y los factores. |
+| `GET` | `/api/properties/:id/estimations` | Historial de estimaciones de la propiedad (las 10 más recientes). |
+
+- **Datos mínimos (CA2):** superficie del terreno (HU-005), superficie construida si tiene construcción, y municipio y estado (HU-007). Si faltan, responde `422` con `missing: [{ field, section, message }]` para indicar qué completar.
+- **Resultado (CA1, CA3):** `estimatedValue`, `estimatedMin`, `estimatedMax` (MXN), `explanation`, `factors` (`name`, `value`, `impact`: `positive`/`neutral`/`negative`, `explanation`), `modelName`, `modelVersion`, `createdAt`, `isOfficialAppraisal: false` y `disclaimer`.
+- **Precio final (CA4):** la estimación **nunca** modifica `publication_price`. La respuesta incluye el `publicationPrice` vigente y el vendedor lo define con `PATCH /api/properties/:id` (HU-008).
+- **Trazabilidad:** cada estimación se guarda con su fecha, modelo y versión en `ai_estimations` y sus factores en `ai_estimation_factors`.
+
+#### Cómo se calcula
+
+`src/services/estimation/valuation-model.js` es un modelo hedónico explicable (versión `1.1.0`):
+
+1. **Precio de referencia de la zona.** Se busca en `reference_prices` del nivel más específico al más general: código postal → municipio → estado. Si la zona no tiene precios, se usa una referencia nacional y el rango se amplía.
+2. **Valor base.** Terreno × precio por m² + construcción × precio por m² ajustado por **calidad** (`economica` ×0.7, `media` ×1, `residencial` ×1.45, `lujo` ×2.1), estado general y depreciación por antigüedad. Si no hay calidad registrada se asume `media` y el rango se amplía.
+3. **Ajustes.** Recámaras, baños y estacionamientos; servicios básicos (HU-006) y puntos de interés a menos de 1.5 km (HU-007).
+4. **Comparables.** Propiedades activas del mismo tipo **a menos de 2 km** (con coordenadas de HU-007) o del mismo municipio (sin coordenadas). Con 3 o más se combina el resultado con su **mediana ponderada** de precio por m², dando más peso a las más cercanas y parecidas en superficie y calidad.
+5. **Rango.** De ±8 % a ±30 % según los comparables, la calidad, el nivel de referencia y la información disponible.
+
+#### Calibrar los precios de referencia
+
+La migración 005 carga **valores iniciales por estado que no son datos oficiales**. Para una estimación precisa, registra precios por municipio o código postal con su fuente, por ejemplo el Índice SHF de Precios de la Vivienda o las tablas de valores unitarios de suelo y construcción del municipio (ajustadas a valor de mercado):
+
+```sql
+INSERT INTO reference_prices (state, municipality, postal_code, land_price_m2, construction_price_m2, source, valid_from)
+-- Sustituye <precio_terreno> y <precio_construccion> (MXN por m²) por los valores de la fuente.
+VALUES ('Hidalgo', 'Tula de Allende', NULL, <precio_terreno>, <precio_construccion>, 'Fuente y año del dato', '2026-01-01');
+```
+
+Para reemplazar un precio, registra uno nuevo con fecha de vigencia más reciente o desactiva el anterior (`is_active = false`); así se conserva el historial.
+
+#### IA opcional
+
+Si se configura una llave, un modelo de lenguaje redacta la explicación a partir del resultado ya calculado (no cambia las cifras). Sin llave, o si la IA falla, se usa la explicación local. Solo se envían datos del inmueble, nunca datos personales.
+
+```env
+ESTIMATION_AI_API_KEY=        # opcional: API key de Anthropic
+ESTIMATION_AI_MODEL=claude-haiku-4-5-20251001   # opcional
+ESTIMATION_AI_TIMEOUT_MS=8000                   # opcional
+```
+
+Cuando se usa la IA, `modelVersion` queda como `1.1.0+ai:<modelo>`.
+
 ## Calidad de código (SonarQube Cloud)
 
 El análisis estático se ejecuta automáticamente con **SonarQube Cloud** (plan gratuito para repositorios públicos) mediante GitHub Actions.
@@ -266,6 +318,8 @@ Los cambios estructurales de PostgreSQL se versionan con **[node-pg-migrate](htt
 | `migrations/1792700000002_crear-tabla-solicitudes-contacto.js` | Creación de tabla `property_contact_requests` (con llave foránea, CHECK de estado e índice). |
 | `migrations/1792700000003_agregar-icono-a-servicios.js` | Adición de columna `services.icon` y carga de valores. |
 | `migrations/1792700000004_restriccion-formato-telefono.js` | Restricción `chk_users_phone_format` sobre `users.phone`. |
+| `migrations/1792700000005_crear-tabla-precios-referencia.js` | Creación de tabla `reference_prices` (precios por m² por estado, municipio o código postal) con valores iniciales por estado. HU-009. |
+| `migrations/1792700000006_agregar-calidad-construccion.js` | Columna `property_features.construction_quality` con restricción de valores. HU-005 / HU-009. |
 
 ### Configuración
 
@@ -291,9 +345,9 @@ Debe apuntar a una base de **desarrollo o pruebas** (por ejemplo `terravalle_dev
 ### Desde una base limpia
 
 ```bash
-npm run migrate:status   # 4 pendientes
+npm run migrate:status   # 6 pendientes
 npm run migrate:up       # crea todo el esquema y aplica los cambios
-npm run migrate:status   # 4 aplicadas
+npm run migrate:status   # 6 aplicadas
 ```
 
 ### Reversión controlada y reaplicación
