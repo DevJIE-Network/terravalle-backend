@@ -1,6 +1,11 @@
 const express = require('express');
 
 const {
+  requestEstimation,
+  listEstimations,
+} = require('../controllers/estimation.controller');
+
+const {
   // HU-008
   listMyProperties,
   getMyProperty,
@@ -219,4 +224,20 @@ router.delete(
   removeNearbyPlace,
 );
 
-module.exports = router;
+/**
+ * HU-009
+ * Solicitar y consultar estimaciones orientativas del valor.
+ */
+router.post(
+  '/:id/estimations',
+  requireAuth,
+  requestEstimation,
+);
+
+router.get(
+  '/:id/estimations',
+  requireAuth,
+  listEstimations,
+);
+
+module.exports = router;

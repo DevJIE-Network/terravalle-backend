@@ -28,6 +28,7 @@ const CHARACTERISTICS_COLUMNS = `
   parking_spaces,
   age_years,
   general_condition,
+  construction_quality,
   created_at,
   updated_at
 `;
@@ -125,6 +126,9 @@ function toCharacteristics(row) {
 
     generalCondition:
       row.general_condition ?? null,
+
+    constructionQuality:
+      row.construction_quality ?? null,
 
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -351,7 +355,8 @@ async function upsertCharacteristics(
        floors,
        parking_spaces,
        age_years,
-       general_condition
+       general_condition,
+       construction_quality
      )
      VALUES (
        $1,
@@ -365,7 +370,8 @@ async function upsertCharacteristics(
        $9,
        $10,
        $11,
-       $12
+       $12,
+       $13
      )
      ON CONFLICT (property_id)
      DO UPDATE SET
@@ -400,7 +406,10 @@ async function upsertCharacteristics(
          EXCLUDED.age_years,
 
        general_condition =
-         EXCLUDED.general_condition
+         EXCLUDED.general_condition,
+
+       construction_quality =
+         EXCLUDED.construction_quality
 
      RETURNING
        ${CHARACTERISTICS_COLUMNS}`,
@@ -417,6 +426,7 @@ async function upsertCharacteristics(
       data.parkingSpaces,
       data.constructionAge,
       data.generalCondition,
+      data.constructionQuality ?? null,
     ],
   );
 
@@ -1031,4 +1041,4 @@ module.exports = {
   findPropertiesByOwnerId,
   updateProperty,
   changePropertyStatus,
-};
+};
