@@ -234,6 +234,46 @@ Panel del vendedor: consultar, editar, activar/desactivar y retirar **solo sus p
 - **Edición:** solo se actualizan los campos enviados; deben enviarse al menos uno. El propietario (`owner_id`) y el estado no se pueden cambiar por `PATCH /:id`. `description` y `publicationPrice` aceptan `null` o texto vacío para quitarlos. El título lleva 3 a 150 caracteres, la descripción máximo 3000 y el precio es ≥ 0 con máximo 2 decimales. `propertyTypeId` debe ser un tipo existente y activo.
 - Respuestas: `200` correcto, `400` datos o filtros inválidos (detalle por campo en `errors`), `401` sin sesión, `403` propiedad ajena, `404` inexistente y `409` cambio de estado no permitido o propiedad modificada mientras tanto.
 
+### Explorar propiedades disponibles (HU-010)
+
+`GET /api/properties` es público: no requiere JWT. Devuelve tarjetas resumidas, no la ficha técnica ni datos del propietario.
+
+- Query: `page` entero ≥ 1 (por omisión 1), `limit` entero de 1 a 50 (por omisión 12). Los valores inválidos, vacíos o repetidos responden `400` con `message` y `errors`. También se rechazan páginas cuyo offset exceda los enteros seguros de JavaScript. Como en HU-008, los parámetros ajenos se ignoran; no permiten consultar otros estados.
+- Respuesta `200`, incluso sin resultados o si la página queda fuera del catálogo:
+
+```json
+{
+  "properties": [
+    {
+      "id": "7",
+      "title": "Casa en Tula",
+      "propertyType": { "id": 2, "name": "Casa" },
+      "publicationPrice": 1500000,
+      "location": { "municipality": "Tula de Allende", "state": "Hidalgo", "country": "México" },
+      "landArea": 200,
+      "hasConstruction": true,
+      "builtArea": 150,
+      "primaryPhoto": { "id": "15", "imageUrl": "/uploads/properties/casa.jpg" }
+    }
+  ],
+  "pagination": {
+    "page": 1,
+    "limit": 12,
+    "total": 1,
+    "totalPages": 1,
+    "hasNextPage": false,
+    "hasPreviousPage": false
+  }
+}
+```
+
+- **Completa para el catálogo:** `status = 'active'`, `deleted_at IS NULL`, tipo existente y activo, título recortado de al menos 3 caracteres (HU-004/HU-008), precio de publicación no nulo y ≥ 0, características con superficie de terreno > 0 y superficie construida > 0 si tiene construcción (HU-005), y ubicación con municipio y estado no vacíos. Se utilizan los mismos datos mínimos de superficie y ubicación general que ya consume HU-009. HU-007 acepta ubicaciones solo con coordenadas o dirección libre, pero esas propiedades no entran en este catálogo hasta tener municipio y estado para el resumen general. No se expone la dirección exacta ni las coordenadas.
+- No se exige descripción, fotos, servicios, calidad de construcción ni estimaciones. Esta condición es de visibilidad del catálogo, no cambia la activación ni las validaciones de las historias anteriores y no revalida la ficha técnica completa.
+- Orden: `published_at DESC NULLS LAST, id DESC`. Paginación SQL parametrizada con `LIMIT` y `OFFSET`; conteo y listado comparten las mismas condiciones. `totalPages = ceil(total / limit)`, `hasNextPage = page < totalPages`, `hasPreviousPage = page > 1`.
+- Se devuelve una sola foto: primero `is_primary`, después `sort_order ASC` y `id ASC`. Un `LEFT JOIN LATERAL ... LIMIT 1` evita duplicados; sin fotos, `primaryPhoto` es `null`. `builtArea` es `null` en terrenos sin construcción registrados por HU-005. Las superficies se expresan en m².
+- Sin propiedades: `properties: []`, `total: 0`, `totalPages: 0`; se conservan `page` y `limit` solicitados. Los errores inesperados pasan al middleware global (`500` genérico).
+- Proyección pública explícita: no se consulta `users`, contactos, sesiones ni historial; no se devuelve `ownerId`, descripción completa, metadatos administrativos ni datos internos de fotografías. No requiere migraciones.
+
 ### Estimación orientativa del valor con IA (HU-009)
 
 El vendedor solicita una **estimación orientativa** del valor de su propiedad. Requiere `Authorization: Bearer <token>` y solo funciona sobre propiedades propias (`403` si es de otro vendedor, `404` si no existe, `409` si está retirada).

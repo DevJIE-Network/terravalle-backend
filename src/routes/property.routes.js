@@ -6,6 +6,9 @@ const {
 } = require('../controllers/estimation.controller');
 
 const {
+  // HU-010
+  listPublicProperties,
+
   // HU-008
   listMyProperties,
   getMyProperty,
@@ -45,6 +48,11 @@ const {
 } = require('../middleware/property-photo.middleware');
 
 const router = express.Router();
+
+/**
+ * HU-010: catálogo público. No requiere sesión.
+ */
+router.get('/', listPublicProperties);
 
 /**
  * HU-004
