@@ -28,6 +28,7 @@ const CHARACTERISTICS_COLUMNS = `
   parking_spaces,
   age_years,
   general_condition,
+  construction_quality,
   created_at,
   updated_at
 `;
@@ -125,6 +126,9 @@ function toCharacteristics(row) {
 
     generalCondition:
       row.general_condition ?? null,
+
+    constructionQuality:
+      row.construction_quality ?? null,
 
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -351,7 +355,8 @@ async function upsertCharacteristics(
        floors,
        parking_spaces,
        age_years,
-       general_condition
+       general_condition,
+       construction_quality
      )
      VALUES (
        $1,
@@ -365,7 +370,8 @@ async function upsertCharacteristics(
        $9,
        $10,
        $11,
-       $12
+       $12,
+       $13
      )
      ON CONFLICT (property_id)
      DO UPDATE SET
@@ -400,7 +406,10 @@ async function upsertCharacteristics(
          EXCLUDED.age_years,
 
        general_condition =
-         EXCLUDED.general_condition
+         EXCLUDED.general_condition,
+
+       construction_quality =
+         EXCLUDED.construction_quality
 
      RETURNING
        ${CHARACTERISTICS_COLUMNS}`,
@@ -417,6 +426,7 @@ async function upsertCharacteristics(
       data.parkingSpaces,
       data.constructionAge,
       data.generalCondition,
+      data.constructionQuality ?? null,
     ],
   );
 
@@ -914,6 +924,83 @@ async function findPropertiesByOwnerId(ownerId, { status = null, limit = 20, off
   return rows.map(toProperty);
 }
 
+// HU-010: relaciones 1:1 (UNIQUE property_id en características y ubicación).
+const PUBLIC_CATALOG_SOURCE = `
+  FROM properties p
+  INNER JOIN property_types pt ON pt.id = p.property_type_id
+  INNER JOIN property_features pf ON pf.property_id = p.id
+  INNER JOIN property_locations pl ON pl.property_id = p.id
+`;
+
+// Mínimos para construir la tarjeta, no una nueva validación de activación de HU-008.
+// El precio 0 es válido en HU-004/HU-008; la foto y los servicios no son obligatorios.
+const PUBLIC_CATALOG_FILTERS = `
+  p.status = 'active'
+  AND p.deleted_at IS NULL
+  AND pt.is_active = TRUE
+  AND CHAR_LENGTH(BTRIM(p.title)) >= 3
+  AND p.publication_price IS NOT NULL
+  AND p.publication_price >= 0
+  AND pf.land_area_m2 > 0
+  AND (pf.has_construction = FALSE OR pf.built_area_m2 > 0)
+  AND NULLIF(BTRIM(pl.municipality), '') IS NOT NULL
+  AND NULLIF(BTRIM(pl.state), '') IS NOT NULL
+`;
+
+function toPublicProperty(row) {
+  return {
+    id: String(row.id),
+    title: row.title,
+    propertyType: { id: Number(row.property_type_id), name: row.property_type_name },
+    publicationPrice: Number(row.publication_price),
+    location: {
+      municipality: row.municipality,
+      state: row.state,
+      country: row.country,
+    },
+    landArea: Number(row.land_area_m2),
+    hasConstruction: row.has_construction,
+    builtArea: toNumberOrNull(row.built_area_m2),
+    primaryPhoto: row.primary_photo_id === null ? null : {
+      id: String(row.primary_photo_id),
+      imageUrl: row.primary_photo_url,
+    },
+  };
+}
+
+async function countPublicProperties() {
+  const { rows } = await query(
+    `SELECT COUNT(*) AS total
+     ${PUBLIC_CATALOG_SOURCE}
+     WHERE ${PUBLIC_CATALOG_FILTERS}`,
+  );
+
+  return Number(rows[0].total);
+}
+
+async function findPublicProperties({ limit = 12, offset = 0 } = {}) {
+  const { rows } = await query(
+    `SELECT p.id, p.title, p.property_type_id, pt.name AS property_type_name,
+       p.publication_price, pl.municipality, pl.state, pl.country,
+       pf.land_area_m2, pf.has_construction, pf.built_area_m2,
+       photo.id AS primary_photo_id, photo.image_url AS primary_photo_url
+     ${PUBLIC_CATALOG_SOURCE}
+     LEFT JOIN LATERAL (
+       SELECT pp.id, pp.image_url
+       FROM property_photos pp
+       WHERE pp.property_id = p.id
+       ORDER BY pp.is_primary DESC, pp.sort_order ASC, pp.id ASC
+       LIMIT 1
+     ) photo ON TRUE
+     WHERE ${PUBLIC_CATALOG_FILTERS}
+     ORDER BY p.published_at DESC NULLS LAST, p.id DESC
+     LIMIT $1 OFFSET $2`,
+    [limit, offset],
+  );
+
+  return rows.map(toPublicProperty);
+}
+
 // Campos editables de HU-008 y su columna. owner_id y status nunca se actualizan aquí.
 const UPDATABLE_COLUMNS = {
   title: 'title',
@@ -1031,4 +1118,8 @@ module.exports = {
   findPropertiesByOwnerId,
   updateProperty,
   changePropertyStatus,
-};
+
+  // HU-010
+  countPublicProperties,
+  findPublicProperties,
+};
