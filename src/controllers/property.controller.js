@@ -43,6 +43,10 @@ const {
   '../schemas/property-services.schema',
 );
 
+const {
+  listPublicPropertiesQuerySchema,
+} = require('../schemas/property-catalog.schema');
+
 const PROPERTY_NOT_FOUND_MESSAGE =
   'Propiedad no encontrada.';
 
@@ -837,6 +841,44 @@ const withValidationErrors = (
   });
 
 /**
+ * HU-010: catálogo público resumido, sin datos del propietario.
+ */
+async function listPublicProperties(req, res, next) {
+  try {
+    const result = listPublicPropertiesQuerySchema.safeParse(req.query);
+
+    if (!result.success) {
+      return withValidationErrors(
+        res,
+        'Los parámetros de paginación no son válidos.',
+        result.error,
+      );
+    }
+
+    const { page, limit } = result.data;
+    const [total, properties] = await Promise.all([
+      propertyRepository.countPublicProperties(),
+      propertyRepository.findPublicProperties({ limit, offset: (page - 1) * limit }),
+    ]);
+    const totalPages = Math.ceil(total / limit);
+
+    return res.status(200).json({
+      properties,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPreviousPage: page > 1,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
+/**
  * HU-008
  * Lista únicamente las propiedades
  * del vendedor autenticado.
@@ -1232,6 +1274,9 @@ async function withdrawProperty(
 }
 
 module.exports = {
+  // HU-010
+  listPublicProperties,
+
   // HU-008
   listMyProperties,
   getMyProperty,
