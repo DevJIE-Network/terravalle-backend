@@ -10,6 +10,9 @@ const { z } = require('zod');
 
 const GENERAL_CONDITIONS = ['excelente', 'bueno', 'regular', 'malo'];
 
+// Calidad de la construcción (opcional). La usa la estimación orientativa (HU-009).
+const CONSTRUCTION_QUALITIES = ['economica', 'media', 'residencial', 'lujo'];
+
 const LIMITS = {
   landArea: 10_000_000, // m²
   frontage: 10_000, // m
@@ -34,6 +37,7 @@ const CONSTRUCTION_FIELDS = [
   'parkingSpaces',
   'constructionAge',
   'generalCondition',
+  'constructionQuality',
 ];
 
 // Etiquetas usadas en los mensajes de error.
@@ -48,6 +52,7 @@ const LABELS = {
   parkingSpaces: 'El número de estacionamientos',
   constructionAge: 'La antigüedad',
   generalCondition: 'El estado general',
+  constructionQuality: 'La calidad de la construcción',
 };
 
 const isAbsent = (value) =>
@@ -198,6 +203,17 @@ function validateCharacteristics(data, ctx) {
     add('generalCondition', `El estado general debe ser: ${GENERAL_CONDITIONS.join(', ')}.`);
   }
 
+  // La calidad es opcional: si se envía debe ser un valor del catálogo.
+  if (
+    !isAbsent(data.constructionQuality) &&
+    !CONSTRUCTION_QUALITIES.includes(data.constructionQuality)
+  ) {
+    add(
+      'constructionQuality',
+      `La calidad de la construcción debe ser: ${CONSTRUCTION_QUALITIES.join(', ')}.`,
+    );
+  }
+
   if (
     builtArea !== undefined &&
     landArea !== undefined &&
@@ -226,6 +242,7 @@ const saveCharacteristicsSchema = z
     parkingSpaces: unknownField,
     constructionAge: unknownField,
     generalCondition: unknownField,
+    constructionQuality: unknownField,
   })
   .strict()
   .superRefine(validateCharacteristics);
@@ -251,6 +268,7 @@ function toCharacteristicsRecord(data) {
     parkingSpaces: null,
     constructionAge: null,
     generalCondition: null,
+    constructionQuality: null,
   };
 
   if (hasConstruction) {
@@ -261,6 +279,7 @@ function toCharacteristicsRecord(data) {
     record.parkingSpaces = optionalNumber(data.parkingSpaces) ?? 0;
     record.constructionAge = toNumber(data.constructionAge);
     record.generalCondition = data.generalCondition;
+    record.constructionQuality = isAbsent(data.constructionQuality) ? null : data.constructionQuality;
   }
 
   return record;
@@ -270,5 +289,6 @@ module.exports = {
   saveCharacteristicsSchema,
   toCharacteristicsRecord,
   GENERAL_CONDITIONS,
+  CONSTRUCTION_QUALITIES,
   LIMITS,
 };
