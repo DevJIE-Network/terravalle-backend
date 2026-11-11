@@ -274,6 +274,55 @@ Panel del vendedor: consultar, editar, activar/desactivar y retirar **solo sus p
 - Sin propiedades: `properties: []`, `total: 0`, `totalPages: 0`; se conservan `page` y `limit` solicitados. Los errores inesperados pasan al middleware global (`500` genérico).
 - Proyección pública explícita: no se consulta `users`, contactos, sesiones ni historial; no se devuelve `ownerId`, descripción completa, metadatos administrativos ni datos internos de fotografías. No requiere migraciones.
 
+### Ficha detallada de una propiedad (HU-012)
+
+`GET /api/properties/:id` es público: no requiere JWT. Reúne en una sola respuesta la información publicada por HU-004, HU-020, HU-005, HU-006, HU-007 y, si existe, la última estimación de HU-009. No modifica ningún dato.
+
+- Respuesta `200` (propiedad con `status = 'active'`):
+
+```json
+{
+  "property": {
+    "id": "7",
+    "title": "Casa en Tula",
+    "description": "Casa de dos plantas cerca del centro.",
+    "propertyType": { "id": 2, "name": "Casa" },
+    "publicationPrice": 1500000,
+    "publishedAt": "2026-11-01T18:00:00.000Z",
+    "updatedAt": "2026-11-05T18:00:00.000Z",
+    "photos": [{ "id": "11", "imageUrl": "/uploads/properties/fachada.jpg", "isPrimary": true }],
+    "dimensions": { "landArea": 200.5, "frontage": 10, "depth": 20.05 },
+    "hasConstruction": true,
+    "construction": {
+      "builtArea": 150, "floors": 2, "bedrooms": 3, "bathrooms": 2.5, "parkingSpaces": 1,
+      "constructionAge": 5, "generalCondition": "bueno", "constructionQuality": "media"
+    },
+    "services": [{ "id": 1, "name": "Agua potable", "description": null }],
+    "location": {
+      "street": "Av. Juárez", "exteriorNumber": "120", "neighborhood": "Centro",
+      "municipality": "Tula de Allende", "state": "Hidalgo", "postalCode": "42800", "country": "México",
+      "latitude": 20.0546, "longitude": -99.3417,
+      "formattedAddress": "Av. Juárez 120, Centro, Tula de Allende, Hidalgo"
+    },
+    "nearbyPlaces": [
+      { "id": "30", "name": "Escuela Primaria", "category": { "id": 1, "name": "Escuela" }, "approximateDistanceM": 350, "provider": "manual" }
+    ],
+    "estimate": { "estimatedMin": 1300000, "estimatedValue": 1450000, "estimatedMax": 1600000, "generatedAt": "2026-11-04T18:00:00.000Z" }
+  },
+  "notes": {
+    "publicationPrice": "Precio vigente definido por el vendedor.",
+    "estimate": "Estimación orientativa generada con IA. No es el precio de venta ni un avalúo oficial.",
+    "nearbyPlaces": "Las distancias son aproximadas."
+  }
+}
+```
+
+- **Precio vs. estimación:** `publicationPrice` es siempre el precio vigente del vendedor. `estimate` es un objeto aparte (solo el rango de la estimación más reciente, sin factores ni datos del modelo) y `notes` trae los textos para rotular ambos y las distancias.
+- **Secciones vacías:** sin características, `dimensions` y `construction` son `null` y `hasConstruction` es `false`; sin ubicación, `location` es `null`; sin fotos, servicios, puntos cercanos o estimación, se devuelven `[]` o `null`. La ficha no falla por datos faltantes.
+- **No disponible (CA4):** borrador, eliminada, inexistente o id mal formado → `404` `{ "message": "La propiedad no existe o no está publicada." }`. Desactivada (`inactive`) o retirada (`withdrawn`) → `410` `{ "message": "Esta publicación ya no está disponible.", "available": false }`. En ambos casos no se cargan fotos, servicios ni entorno.
+- **Datos que no se exponen:** dueño (`owner_id`), número interior, estado interno, `storage_key` y metadatos de fotos, explicación y factores de la estimación. Solo se listan servicios activos del catálogo.
+- **Consultas:** una consulta base por id (`deleted_at IS NULL`, `LEFT JOIN` a características y ubicación) y, si está activa, cuatro consultas en paralelo (fotos, servicios, puntos cercanos y última estimación). No requiere migraciones.
+
 ### Estimación orientativa del valor con IA (HU-009)
 
 El vendedor solicita una **estimación orientativa** del valor de su propiedad. Requiere `Authorization: Bearer <token>` y solo funciona sobre propiedades propias (`403` si es de otro vendedor, `404` si no existe, `409` si está retirada).
