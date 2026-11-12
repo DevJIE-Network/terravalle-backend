@@ -238,7 +238,7 @@ Panel del vendedor: consultar, editar, activar/desactivar y retirar **solo sus p
 
 `GET /api/properties` es público: no requiere JWT. Devuelve tarjetas resumidas, no la ficha técnica ni datos del propietario.
 
-- Query: `page` entero ≥ 1 (por omisión 1), `limit` entero de 1 a 50 (por omisión 12). Los valores inválidos, vacíos o repetidos responden `400` con `message` y `errors`. También se rechazan páginas cuyo offset exceda los enteros seguros de JavaScript. Como en HU-008, los parámetros ajenos se ignoran; no permiten consultar otros estados.
+- Query: `page` entero ≥ 1 (por omisión 1), `limit` entero de 1 a 50 (por omisión 12). Los valores inválidos, vacíos o repetidos responden `400` con `message` y `errors`. Los filtros de búsqueda de HU-011 se describen en la sección siguiente. También se rechazan páginas cuyo offset exceda los enteros seguros de JavaScript. Como en HU-008, los parámetros ajenos se ignoran; no permiten consultar otros estados.
 - Respuesta `200`, incluso sin resultados o si la página queda fuera del catálogo:
 
 ```json
@@ -273,6 +273,80 @@ Panel del vendedor: consultar, editar, activar/desactivar y retirar **solo sus p
 - Se devuelve una sola foto: primero `is_primary`, después `sort_order ASC` y `id ASC`. Un `LEFT JOIN LATERAL ... LIMIT 1` evita duplicados; sin fotos, `primaryPhoto` es `null`. `builtArea` es `null` en terrenos sin construcción registrados por HU-005. Las superficies se expresan en m².
 - Sin propiedades: `properties: []`, `total: 0`, `totalPages: 0`; se conservan `page` y `limit` solicitados. Los errores inesperados pasan al middleware global (`500` genérico).
 - Proyección pública explícita: no se consulta `users`, contactos, sesiones ni historial; no se devuelve `ownerId`, descripción completa, metadatos administrativos ni datos internos de fotografías. No requiere migraciones.
+
+### Buscar y filtrar propiedades (HU-011)
+
+Es el mismo `GET /api/properties` público de HU-010 con filtros opcionales en la query. Sin filtros devuelve el catálogo general; con filtros devuelve **solo propiedades activas** (mismas condiciones de visibilidad de HU-010) que cumplan **todos** los criterios enviados (combinación con `AND`). Mantiene `page`, `limit` y el orden `published_at DESC NULLS LAST, id DESC`.
+
+| Parámetro | Tipo | Criterio |
+| --- | --- | --- |
+| `q` | texto (máx. 100) | Contiene el texto en título, municipio o estado (sin distinguir mayúsculas). |
+| `propertyTypeId` | entero ≥ 1 | Tipo de inmueble (id de `property_types`). |
+| `minPrice`, `maxPrice` | número ≥ 0, 2 decimales | Rango de `publicationPrice`. |
+| `state`, `municipality` | texto (máx. 120) | Ubicación; coincidencia parcial sin distinguir mayúsculas. |
+| `minLandArea`, `maxLandArea` | número ≥ 0 (m², máx. 10,000,000) | Rango de superficie de terreno. |
+| `hasConstruction` | `true` / `false` | Con o sin construcción. |
+| `minBuiltArea`, `maxBuiltArea` | número ≥ 0 (m²) | Rango de superficie construida (excluye terrenos sin construcción). |
+| `serviceIds` | ids separados por coma o repetidos | La propiedad debe tener **todos** los servicios indicados. |
+
+Ejemplo: `GET /api/properties?propertyTypeId=1&state=Hidalgo&maxPrice=500000&serviceIds=1,2&page=1&limit=12`
+
+- **Limpiar filtros (CA3):** un campo vacío (`?minPrice=`) cuenta como "sin filtro"; sin ningún filtro la respuesta es exactamente la del catálogo general de HU-010.
+- **Rangos inválidos (CA4):** si el mínimo es mayor que el máximo, un valor no numérico o negativo, un booleano inválido o un identificador inválido, responde `400` con `message: "Los parámetros de búsqueda no son válidos."` y `errors` por campo (`{ field, message }`) **antes** de consultar la base de datos. Los valores repetidos de un filtro escalar también se rechazan.
+- **Servicios del catálogo:** cada id de `serviceIds` debe ser un servicio activo del catálogo de TerraValle (HU-006); si no, `400` con `field: "serviceIds"` indicando los ids desconocidos.
+- **Sin resultados (CA2):** `200` con `properties: []`, `pagination.total: 0` y `message: "No se encontraron propiedades que cumplan los filtros seleccionados."`. No es un error.
+- **Filtros aplicados:** cuando hay filtros, la respuesta incluye `filters` con los criterios normalizados (por ejemplo `{ "propertyTypeId": 1, "maxPrice": 500000, "serviceIds": [1, 2] }`). Sin filtros ese campo no aparece.
+- **Seguridad:** todos los valores viajan como parámetros SQL (`$n`); el texto se escapa para que `%`, `_` y `\` se busquen literalmente. Los parámetros no reconocidos (`status`, `ownerId`, etc.) se ignoran: no se pueden consultar propiedades que no estén activas.
+- **Índices:** la migración `1792700000007_indices-busqueda-propiedades.js` agrega índices parciales para el orden del catálogo y tipo/precio, y para las superficies. La búsqueda de texto usa `ILIKE '%texto%'`, que no usa índices B-tree.
+
+### Ficha detallada de una propiedad (HU-012)
+
+`GET /api/properties/:id` es público: no requiere JWT. Reúne en una sola respuesta la información publicada por HU-004, HU-020, HU-005, HU-006, HU-007 y, si existe, la última estimación de HU-009. No modifica ningún dato.
+
+- Respuesta `200` (propiedad con `status = 'active'`):
+
+```json
+{
+  "property": {
+    "id": "7",
+    "title": "Casa en Tula",
+    "description": "Casa de dos plantas cerca del centro.",
+    "propertyType": { "id": 2, "name": "Casa" },
+    "publicationPrice": 1500000,
+    "publishedAt": "2026-11-01T18:00:00.000Z",
+    "updatedAt": "2026-11-05T18:00:00.000Z",
+    "photos": [{ "id": "11", "imageUrl": "/uploads/properties/fachada.jpg", "isPrimary": true }],
+    "dimensions": { "landArea": 200.5, "frontage": 10, "depth": 20.05 },
+    "hasConstruction": true,
+    "construction": {
+      "builtArea": 150, "floors": 2, "bedrooms": 3, "bathrooms": 2.5, "parkingSpaces": 1,
+      "constructionAge": 5, "generalCondition": "bueno", "constructionQuality": "media"
+    },
+    "services": [{ "id": 1, "name": "Agua potable", "description": null }],
+    "location": {
+      "street": "Av. Juárez", "exteriorNumber": "120", "neighborhood": "Centro",
+      "municipality": "Tula de Allende", "state": "Hidalgo", "postalCode": "42800", "country": "México",
+      "latitude": 20.0546, "longitude": -99.3417,
+      "formattedAddress": "Av. Juárez 120, Centro, Tula de Allende, Hidalgo"
+    },
+    "nearbyPlaces": [
+      { "id": "30", "name": "Escuela Primaria", "category": { "id": 1, "name": "Escuela" }, "approximateDistanceM": 350, "provider": "manual" }
+    ],
+    "estimate": { "estimatedMin": 1300000, "estimatedValue": 1450000, "estimatedMax": 1600000, "generatedAt": "2026-11-04T18:00:00.000Z" }
+  },
+  "notes": {
+    "publicationPrice": "Precio vigente definido por el vendedor.",
+    "estimate": "Estimación orientativa generada con IA. No es el precio de venta ni un avalúo oficial.",
+    "nearbyPlaces": "Las distancias son aproximadas."
+  }
+}
+```
+
+- **Precio vs. estimación:** `publicationPrice` es siempre el precio vigente del vendedor. `estimate` es un objeto aparte (solo el rango de la estimación más reciente, sin factores ni datos del modelo) y `notes` trae los textos para rotular ambos y las distancias.
+- **Secciones vacías:** sin características, `dimensions` y `construction` son `null` y `hasConstruction` es `false`; sin ubicación, `location` es `null`; sin fotos, servicios, puntos cercanos o estimación, se devuelven `[]` o `null`. La ficha no falla por datos faltantes.
+- **No disponible (CA4):** borrador, eliminada, inexistente o id mal formado → `404` `{ "message": "La propiedad no existe o no está publicada." }`. Desactivada (`inactive`) o retirada (`withdrawn`) → `410` `{ "message": "Esta publicación ya no está disponible.", "available": false }`. En ambos casos no se cargan fotos, servicios ni entorno.
+- **Datos que no se exponen:** dueño (`owner_id`), número interior, estado interno, `storage_key` y metadatos de fotos, explicación y factores de la estimación. Solo se listan servicios activos del catálogo.
+- **Consultas:** una consulta base por id (`deleted_at IS NULL`, `LEFT JOIN` a características y ubicación) y, si está activa, cuatro consultas en paralelo (fotos, servicios, puntos cercanos y última estimación). No requiere migraciones.
 
 ### Estimación orientativa del valor con IA (HU-009)
 

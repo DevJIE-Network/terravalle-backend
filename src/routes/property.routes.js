@@ -6,6 +6,10 @@ const {
 } = require('../controllers/estimation.controller');
 
 const {
+  getPublicProperty,
+} = require('../controllers/property-detail.controller');
+
+const {
   // HU-010
   listPublicProperties,
 
@@ -97,6 +101,15 @@ router.get(
   requireAuth,
   getNearbyPlaceCategories,
 );
+
+/**
+ * HU-012
+ * Ficha detallada pública de una propiedad. No requiere sesión.
+ *
+ * Debe ir después de /mine y /nearby-place-categories
+ * para que esas rutas no se interpreten como un :id.
+ */
+router.get('/:id', getPublicProperty);
 
 /**
  * HU-008
