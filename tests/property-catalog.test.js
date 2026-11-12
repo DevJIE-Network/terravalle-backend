@@ -64,14 +64,14 @@ function request(query = '', options) {
 test('HU-010 esquema usa page=1 y limit=12 por omisión', () => {
   const result = parse({});
   assert.equal(result.success, true);
-  assert.deepEqual(result.data, { page: 1, limit: 12 });
+  assert.deepEqual(result.data, { page: 1, limit: 12, filters: {} });
 });
 
 test('HU-010 esquema acepta page válido sin cambiar el límite por omisión', () => {
   for (const page of ['2', 3, ' 4 ']) {
     const result = parse({ page });
     assert.equal(result.success, true);
-    assert.deepEqual(result.data, { page: Number(page), limit: 12 });
+    assert.deepEqual(result.data, { page: Number(page), limit: 12, filters: {} });
   }
 });
 
@@ -79,7 +79,7 @@ test('HU-010 esquema acepta limit válido, incluidos 1 y 50', () => {
   for (const limit of ['1', 12, '50']) {
     const result = parse({ limit });
     assert.equal(result.success, true);
-    assert.deepEqual(result.data, { page: 1, limit: Number(limit) });
+    assert.deepEqual(result.data, { page: 1, limit: Number(limit), filters: {} });
   }
 });
 
@@ -125,7 +125,7 @@ test('HU-010 esquema admite offsets seguros grandes sin desbordamiento', () => {
 test('HU-010 esquema ignora parámetros ajenos sin permitir filtros privados', () => {
   const result = parse({ status: 'draft', ownerId: '101', _: '12345' });
   assert.equal(result.success, true);
-  assert.deepEqual(result.data, { page: 1, limit: 12 });
+  assert.deepEqual(result.data, { page: 1, limit: 12, filters: {} });
 });
 
 // ---------------------------------------------------------------- Controlador y paginación
@@ -145,9 +145,9 @@ test('HU-010 controlador funciona sin req.auth y consulta el catálogo una sola 
     },
   });
   assert.equal(count.mock.callCount(), 1);
-  assert.deepEqual(count.mock.calls[0].arguments, []);
+  assert.deepEqual(count.mock.calls[0].arguments, [{}]);
   assert.equal(find.mock.callCount(), 1);
-  assert.deepEqual(find.mock.calls[0].arguments, [{ limit: 12, offset: 0 }]);
+  assert.deepEqual(find.mock.calls[0].arguments, [{ limit: 12, offset: 0, filters: {} }]);
   assert.equal(next.mock.callCount(), 0);
 });
 
@@ -170,7 +170,7 @@ for (const [page, expectedIds, hasNextPage, hasPreviousPage] of [
     assert.deepEqual(res.body.pagination, {
       page, limit: 12, total: 35, totalPages: 3, hasNextPage, hasPreviousPage,
     });
-    assert.deepEqual(find.mock.calls[0].arguments, [{ limit: 12, offset: (page - 1) * 12 }]);
+    assert.deepEqual(find.mock.calls[0].arguments, [{ limit: 12, offset: (page - 1) * 12, filters: {} }]);
   });
 }
 
@@ -197,7 +197,7 @@ test('HU-010 consultas inválidas no ejecutan ningún método del repository', a
     const res = mockRes();
     await listPublicProperties({ query }, res, next);
     assert.equal(res.statusCode, 400);
-    assert.equal(res.body.message, 'Los parámetros de paginación no son válidos.');
+    assert.equal(res.body.message, 'Los parámetros de búsqueda no son válidos.');
     assert.ok(res.body.errors.some((error) => error.field === field && error.message.length > 0));
   }
 
@@ -258,8 +258,8 @@ test('HU-010 HTTP respeta page y limit sin permitir cambiar el estado público',
   assert.deepEqual(body.pagination, {
     page: 2, limit: 12, total: 35, totalPages: 3, hasNextPage: true, hasPreviousPage: true,
   });
-  assert.deepEqual(count.mock.calls[0].arguments, []);
-  assert.deepEqual(find.mock.calls[0].arguments, [{ limit: 12, offset: 12 }]);
+  assert.deepEqual(count.mock.calls[0].arguments, [{}]);
+  assert.deepEqual(find.mock.calls[0].arguments, [{ limit: 12, offset: 12, filters: {} }]);
 });
 
 test('HU-010 sin propiedades devuelve HTTP 200, properties vacío y paginación válida', async (t) => {

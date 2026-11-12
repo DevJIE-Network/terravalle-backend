@@ -841,7 +841,9 @@ const withValidationErrors = (
   });
 
 /**
- * HU-010: catálogo público resumido, sin datos del propietario.
+ * HU-010 / HU-011: catálogo público resumido, sin datos del propietario.
+ * Sin parámetros devuelve el catálogo general; con filtros devuelve solo las propiedades
+ * activas que cumplen TODOS los criterios.
  */
 async function listPublicProperties(req, res, next) {
   try {
@@ -850,17 +852,36 @@ async function listPublicProperties(req, res, next) {
     if (!result.success) {
       return withValidationErrors(
         res,
-        'Los parámetros de paginación no son válidos.',
+        'Los parámetros de búsqueda no son válidos.',
         result.error,
       );
     }
 
-    const { page, limit } = result.data;
+    const { page, limit, filters } = result.data;
+
+    // Regla de negocio: los servicios del filtro deben pertenecer al catálogo de TerraValle.
+    if (filters.serviceIds) {
+      const catalog = await serviceRepository.findActiveServicesByIds(filters.serviceIds);
+      const known = new Set(catalog.map((service) => service.id));
+      const unknown = filters.serviceIds.filter((id) => !known.has(id));
+
+      if (unknown.length > 0) {
+        return res.status(400).json({
+          message: 'Los parámetros de búsqueda no son válidos.',
+          errors: [{
+            field: 'serviceIds',
+            message: `Los siguientes servicios no pertenecen al catálogo de TerraValle: ${unknown.join(', ')}.`,
+          }],
+        });
+      }
+    }
+
     const [total, properties] = await Promise.all([
-      propertyRepository.countPublicProperties(),
-      propertyRepository.findPublicProperties({ limit, offset: (page - 1) * limit }),
+      propertyRepository.countPublicProperties(filters),
+      propertyRepository.findPublicProperties({ limit, offset: (page - 1) * limit, filters }),
     ]);
     const totalPages = Math.ceil(total / limit);
+    const hasFilters = Object.keys(filters).length > 0;
 
     return res.status(200).json({
       properties,
@@ -872,6 +893,11 @@ async function listPublicProperties(req, res, next) {
         hasNextPage: page < totalPages,
         hasPreviousPage: page > 1,
       },
+      // Solo cuando hay búsqueda activa: sin filtros la respuesta es la del catálogo general.
+      ...(hasFilters && { filters }),
+      ...(hasFilters && total === 0 && {
+        message: 'No se encontraron propiedades que cumplan los filtros seleccionados.',
+      }),
     });
   } catch (error) {
     return next(error);
@@ -1309,4 +1335,4 @@ module.exports = {
   // Compartidos con HU-009
   loadOwnedProperty,
   NOT_OWNER_VIEW_MESSAGE,
-};
+};
