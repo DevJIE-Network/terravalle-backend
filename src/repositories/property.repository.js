@@ -968,17 +968,90 @@ function toPublicProperty(row) {
   };
 }
 
-async function countPublicProperties() {
+/** Escapa % _ \\ para que el texto del usuario se busque literalmente en un ILIKE. */
+const toContainsPattern = (text) => `%${text.replace(/[\\%_]/g, '\\$&')}%`;
+
+/**
+ * HU-011: condiciones adicionales de búsqueda. Todas se combinan con AND sobre las
+ * condiciones base del catálogo (HU-010), por lo que solo se filtran propiedades activas.
+ * Ningún valor del usuario se concatena en el SQL: viajan como parámetros ($1, $2, ...).
+ * @returns {{ conditions: string, params: Array }} conditions vacío si no hay filtros.
+ */
+function buildSearchConditions(filters = {}) {
+  const clauses = [];
+  const params = [];
+  const bind = (value) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  if (filters.q !== undefined) {
+    const pattern = bind(toContainsPattern(filters.q));
+    clauses.push(
+      `(p.title ILIKE ${pattern} ESCAPE '\\' OR pl.municipality ILIKE ${pattern} ESCAPE '\\' `
+      + `OR pl.state ILIKE ${pattern} ESCAPE '\\')`,
+    );
+  }
+  if (filters.propertyTypeId !== undefined) {
+    clauses.push(`p.property_type_id = ${bind(filters.propertyTypeId)}::smallint`);
+  }
+  if (filters.minPrice !== undefined) {
+    clauses.push(`p.publication_price >= ${bind(filters.minPrice)}::numeric`);
+  }
+  if (filters.maxPrice !== undefined) {
+    clauses.push(`p.publication_price <= ${bind(filters.maxPrice)}::numeric`);
+  }
+  if (filters.state !== undefined) {
+    clauses.push(`pl.state ILIKE ${bind(toContainsPattern(filters.state))} ESCAPE '\\'`);
+  }
+  if (filters.municipality !== undefined) {
+    clauses.push(`pl.municipality ILIKE ${bind(toContainsPattern(filters.municipality))} ESCAPE '\\'`);
+  }
+  if (filters.minLandArea !== undefined) {
+    clauses.push(`pf.land_area_m2 >= ${bind(filters.minLandArea)}::numeric`);
+  }
+  if (filters.maxLandArea !== undefined) {
+    clauses.push(`pf.land_area_m2 <= ${bind(filters.maxLandArea)}::numeric`);
+  }
+  if (filters.hasConstruction !== undefined) {
+    clauses.push(`pf.has_construction = ${bind(filters.hasConstruction)}::boolean`);
+  }
+  if (filters.minBuiltArea !== undefined) {
+    clauses.push(`pf.built_area_m2 >= ${bind(filters.minBuiltArea)}::numeric`);
+  }
+  if (filters.maxBuiltArea !== undefined) {
+    clauses.push(`pf.built_area_m2 <= ${bind(filters.maxBuiltArea)}::numeric`);
+  }
+  if (filters.serviceIds !== undefined && filters.serviceIds.length > 0) {
+    // La propiedad debe tener TODOS los servicios seleccionados (ids sin duplicados).
+    const ids = bind(filters.serviceIds);
+    clauses.push(
+      '(SELECT COUNT(*) FROM property_services ps '
+      + `WHERE ps.property_id = p.id AND ps.service_id = ANY(${ids}::smallint[])) `
+      + `= CARDINALITY(${ids}::smallint[])`,
+    );
+  }
+
+  return {
+    conditions: clauses.map((clause) => ` AND ${clause}`).join(''),
+    params,
+  };
+}
+
+async function countPublicProperties(filters = {}) {
+  const { conditions, params } = buildSearchConditions(filters);
   const { rows } = await query(
     `SELECT COUNT(*) AS total
      ${PUBLIC_CATALOG_SOURCE}
-     WHERE ${PUBLIC_CATALOG_FILTERS}`,
+     WHERE ${PUBLIC_CATALOG_FILTERS}${conditions}`,
+    params,
   );
 
   return Number(rows[0].total);
 }
 
-async function findPublicProperties({ limit = 12, offset = 0 } = {}) {
+async function findPublicProperties({ limit = 12, offset = 0, filters = {} } = {}) {
+  const { conditions, params } = buildSearchConditions(filters);
   const { rows } = await query(
     `SELECT p.id, p.title, p.property_type_id, pt.name AS property_type_name,
        p.publication_price, pl.municipality, pl.state, pl.country,
@@ -992,10 +1065,10 @@ async function findPublicProperties({ limit = 12, offset = 0 } = {}) {
        ORDER BY pp.is_primary DESC, pp.sort_order ASC, pp.id ASC
        LIMIT 1
      ) photo ON TRUE
-     WHERE ${PUBLIC_CATALOG_FILTERS}
+     WHERE ${PUBLIC_CATALOG_FILTERS}${conditions}
      ORDER BY p.published_at DESC NULLS LAST, p.id DESC
-     LIMIT $1 OFFSET $2`,
-    [limit, offset],
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, limit, offset],
   );
 
   return rows.map(toPublicProperty);
@@ -1122,4 +1195,4 @@ module.exports = {
   // HU-010
   countPublicProperties,
   findPublicProperties,
-};
+};
