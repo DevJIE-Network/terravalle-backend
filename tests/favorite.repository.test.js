@@ -173,3 +173,59 @@ test('favorite.repository removeFavorite idempotente', async (t) => {
   const result = await repository.removeFavorite('1', '999');
   assert.equal(result, false);
 });
+
+test('favorite.repository addFavorite userId inválido', async (t) => {
+  const { repository } = loadWithMockedDatabase(t, REPO, {
+    rows: [],
+  });
+
+  try {
+    await repository.addFavorite('abc', '2');
+    assert.fail('Should have thrown error');
+  } catch (error) {
+    assert.strictEqual(error.message, 'ID de usuario o propiedad inválido.');
+    assert.strictEqual(error.status, 400);
+  }
+});
+
+test('favorite.repository addFavorite propertyId inválido', async (t) => {
+  const { repository } = loadWithMockedDatabase(t, REPO, {
+    rows: [],
+  });
+
+  try {
+    await repository.addFavorite('1', 'abc');
+    assert.fail('Should have thrown error');
+  } catch (error) {
+    assert.strictEqual(error.message, 'ID de usuario o propiedad inválido.');
+    assert.strictEqual(error.status, 400);
+  }
+});
+
+test('favorite.repository removeFavorite userId inválido', async (t) => {
+  const { repository } = loadWithMockedDatabase(t, REPO, {
+    rows: [{ id: 1 }],
+  });
+
+  try {
+    await repository.removeFavorite('abc', '2');
+    assert.fail('Should have thrown error');
+  } catch (error) {
+    assert.strictEqual(error.message, 'ID de usuario o propiedad inválido.');
+    assert.strictEqual(error.status, 400);
+  }
+});
+
+test('favorite.repository removeFavorite propertyId inválido', async (t) => {
+  const { repository } = loadWithMockedDatabase(t, REPO, {
+    rows: [{ id: 1 }],
+  });
+
+  try {
+    await repository.removeFavorite('1', 'abc');
+    assert.fail('Should have thrown error');
+  } catch (error) {
+    assert.strictEqual(error.message, 'ID de usuario o propiedad inválido.');
+    assert.strictEqual(error.status, 400);
+  }
+});
