@@ -1083,6 +1083,33 @@ const UPDATABLE_COLUMNS = {
 };
 
 /**
+ * Obtiene los canales de contacto autorizados para una propiedad.
+ * Retorna el primer canal habilitado, o null si no hay ninguno configurado.
+ */
+async function findContactChannelsByPropertyId(propertyId) {
+  if (!isValidId(propertyId)) {
+    return null;
+  }
+
+  const { rows } = await query(
+    `SELECT id, channel_type, contact_value, is_enabled
+     FROM property_contact_channels
+     WHERE property_id = $1 AND is_enabled = TRUE
+     ORDER BY id ASC
+     LIMIT 1`,
+    [propertyId],
+  );
+
+  return rows.length > 0
+    ? rows.map((row) => ({
+        id: String(row.id),
+        channelType: row.channel_type,
+        contactValue: row.contact_value,
+      }))
+    : null;
+}
+
+/**
  * HU-008
  * Actualiza solo los campos enviados. La condición owner_id evita modificar propiedades
  * ajenas aunque falle una validación previa, y las retiradas no se pueden editar.
@@ -1185,6 +1212,9 @@ module.exports = {
   findNearbyPlacesByPropertyId,
   createNearbyPlace,
   deleteNearbyPlace,
+
+  // HU-013
+  findContactChannelsByPropertyId,
 
   // HU-008
   countPropertiesByOwnerId,

@@ -6,6 +6,10 @@ const {
 } = require('../controllers/estimation.controller');
 
 const {
+  getContact,
+} = require('../controllers/property.controller');
+
+const {
   getPublicProperty,
 } = require('../controllers/property-detail.controller');
 
@@ -110,6 +114,16 @@ router.get(
  * para que esas rutas no se interpreten como un :id.
  */
 router.get('/:id', getPublicProperty);
+
+/**
+ * HU-013
+ * Obtiene el medio de contacto autorizado por el vendedor
+ * para una propiedad activa.
+ * Consulta pública: no requiere sesión.
+ *
+ * Debe ir después de /:id para que no se interponga en la ruta de la ficha.
+ */
+router.get('/:id/contact', getContact);
 
 /**
  * HU-008
