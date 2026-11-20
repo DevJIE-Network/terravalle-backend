@@ -576,33 +576,7 @@ test('HU-014 POST /api/favorites/1 -> 404 (propiedad inexistente para usuario au
 
 /* ------------------------------ new tests ------------------------------ */
 
-test('HU-014 POST /api/favorites/8 -> 400 (propiedad draft)', async () => {
-  const port = server.address().port;
-  const token = signTestToken(1);
-
-  favoriteRepository.findPropertyById = async (id) => {
-    if (id === '8') {
-      return createProperty('draft');
-    }
-    return null;
-  };
-
-  favoriteRepository.addFavorite = async (userId, propertyId) => {
-    return { created: false, favorite: {} };
-  };
-
-  favoriteRepository.getFavoritesByUser = async (userId) => {
-    return [];
-  };
-
-  favoriteRepository.removeFavorite = async (userId, propertyId) => {
-    return false;
-  };
-
-  await makeRequest(port, '/api/favorites/8', 'POST', null, token);
-});
-
-test('HU-014 POST /api/favorites -> 500 (error repository -> middleware global)', async () => {
+test('HU-014 DELETE /api/favorites/2 -> 500 (error repository -> middleware global - removeFavorite)', async () => {
   const port = server.address().port;
   const token = signTestToken(1);
 
@@ -611,7 +585,30 @@ test('HU-014 POST /api/favorites -> 500 (error repository -> middleware global)'
   };
 
   favoriteRepository.addFavorite = async (userId, propertyId) => {
+    return { created: true, favorite: { id: 1, user_id: userId, property_id: propertyId, created_at: new Date() } };
+  };
+
+  // Error en removeFavorite -> 500 al middleware global
+  favoriteRepository.removeFavorite = async (userId, propertyId) => {
     throw new Error('Error inesperado del repository');
+  };
+
+  await makeRequest(port, '/api/favorites/2', 'DELETE', null, token);
+});
+
+test('HU-014 POST /api/favorites/2 -> 200 (idempotente duplicado, escenario completo)', async () => {
+  const port = server.address().port;
+  const token = signTestToken(1);
+
+  favoriteRepository.findPropertyById = async (id) => {
+    if (id === '2') {
+      return createProperty('active');
+    }
+    return null;
+  };
+
+  favoriteRepository.addFavorite = async (userId, propertyId) => {
+    return { created: false, favorite: { id: 11, user_id: userId, property_id: propertyId, created_at: new Date() } };
   };
 
   favoriteRepository.getFavoritesByUser = async (userId) => {
@@ -625,7 +622,7 @@ test('HU-014 POST /api/favorites -> 500 (error repository -> middleware global)'
   await makeRequest(port, '/api/favorites/2', 'POST', null, token);
 });
 
-test('HU-014 GET /api/favorites -> 500 (error repository -> middleware global)', async () => {
+test('HU-014 POST /api/favorites/invalid -> 400 (propertyId inválido con mensaje)', async () => {
   const port = server.address().port;
   const token = signTestToken(1);
 
@@ -634,35 +631,16 @@ test('HU-014 GET /api/favorites -> 500 (error repository -> middleware global)',
   };
 
   favoriteRepository.addFavorite = async (userId, propertyId) => {
-    return { created: false, favorite: {} };
+    throw new Error('ID de propiedad inválido');
   };
 
   favoriteRepository.getFavoritesByUser = async (userId) => {
-    throw new Error('Error inesperado del repository');
+    return [];
   };
 
   favoriteRepository.removeFavorite = async (userId, propertyId) => {
     return false;
   };
 
-  await makeRequest(port, '/api/favorites', 'GET', null, token);
-});
-
-test('HU-014 DELETE /api/favorites/2 -> 500 (error repository -> middleware global)', async () => {
-  const port = server.address().port;
-  const token = signTestToken(1);
-
-  favoriteRepository.findPropertyById = async (id) => {
-    return { id: '2', status: 'active', deleted_at: null };
-  };
-
-  favoriteRepository.addFavorite = async (userId, propertyId) => {
-    return { created: true, favorite: { id: 1, user_id: userId, property_id: propertyId, created_at: new Date() } };
-  };
-
-  favoriteRepository.removeFavorite = async (userId, propertyId) => {
-    throw new Error('Error inesperado del repository');
-  };
-
-  await makeRequest(port, '/api/favorites/2', 'DELETE', null, token);
+  await makeRequest(port, '/api/favorites/invalid', 'POST', null, token);
 });
