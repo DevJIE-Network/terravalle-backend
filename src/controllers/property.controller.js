@@ -1312,7 +1312,7 @@ async function getContact(req, res, next) {
     const { id } = req.params;
 
     // Validar ID de propiedad
-    if (!isValidId(id)) {
+    if (!propertyRepository.isValidId(id)) {
       return res.status(400).json({
         message: 'El identificador de propiedad no es válido.',
       });

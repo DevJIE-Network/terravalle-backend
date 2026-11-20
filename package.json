@@ -13,7 +13,8 @@
     "migrate:redo": "node-pg-migrate -m migrations -d MIGRATION_DATABASE_URL --envPath .env redo",
     "migrate:status": "node scripts/migrate-status.js",
     "migrate:baseline": "node-pg-migrate -m migrations -d MIGRATION_DATABASE_URL --envPath .env up 1 --fake",
-    "migrate:create": "node-pg-migrate create -m migrations -j js"
+    "migrate:create": "node-pg-migrate create -m migrations -j js",
+    "seed:dev": "node scripts/seed-dev.js"
   },
   "repository": {
     "type": "git",

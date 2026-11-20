@@ -35,6 +35,12 @@ const corsOptions = {
 app.disable('x-powered-by');
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
+
+// Fotos subidas por los vendedores (multer las guarda en uploads/properties).
+app.use(
+  '/uploads',
+  express.static(path.join(process.cwd(), 'uploads'), { maxAge: '7d', index: false }),
+);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/services', serviceRoutes);
 
