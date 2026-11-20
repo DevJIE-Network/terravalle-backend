@@ -56,6 +56,9 @@ const NOT_OWNER_MESSAGE =
 const NOT_OWNER_VIEW_MESSAGE =
   'No tienes permiso para consultar esta propiedad.';
 
+const CONTACT_NOT_AVAILABLE_MESSAGE =
+  'El contacto no está disponible para esta propiedad.';
+
 /**
  * HU-004
  * Registra una nueva propiedad.
@@ -1299,6 +1302,73 @@ async function withdrawProperty(
   }
 }
 
+/**
+ * HU-013 · Obtiene el medio de contacto autorizado por el vendedor
+ * para una propiedad activa.
+ * Consulta pública: no requiere autenticación.
+ */
+async function getContact(req, res, next) {
+  try {
+    const { id } = req.params;
+
+    // Validar ID de propiedad
+    if (!isValidId(id)) {
+      return res.status(400).json({
+        message: 'El identificador de propiedad no es válido.',
+      });
+    }
+
+    // Buscar la propiedad
+    const property =
+      await propertyRepository.findPropertyById(id);
+
+    if (!property) {
+      return res.status(404).json({
+        message: PROPERTY_NOT_FOUND_MESSAGE,
+      });
+    }
+
+    // La propiedad debe estar activa/publicada
+    if (property.status !== 'active') {
+      return res.status(404).json({
+        message: CONTACT_NOT_AVAILABLE_MESSAGE,
+      });
+    }
+
+    // Debe tener vendedor asociado
+    if (!property.ownerId) {
+      return res.status(404).json({
+        message: CONTACT_NOT_AVAILABLE_MESSAGE,
+      });
+    }
+
+    // Obtener los canales de contacto autorizados
+    const contactChannels =
+      await propertyRepository.findContactChannelsByPropertyId(id);
+
+    if (
+      !contactChannels ||
+      contactChannels.length === 0
+    ) {
+      return res.status(404).json({
+        message: CONTACT_NOT_AVAILABLE_MESSAGE,
+      });
+    }
+
+    // Retornar el primer canal autorizado (mínimo necesario)
+    const contact = contactChannels[0];
+
+    return res.status(200).json({
+      contact: {
+        type: contact.channelType,
+        value: contact.contactValue,
+      },
+    });
+  } catch (error) {
+    return next(error);
+  }
+}
+
 module.exports = {
   // HU-010
   listPublicProperties,
@@ -1309,6 +1379,9 @@ module.exports = {
   updateProperty,
   changePropertyStatus,
   withdrawProperty,
+
+  // HU-013
+  getContact,
 
   // HU-004
   createProperty,
