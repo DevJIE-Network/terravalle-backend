@@ -8,6 +8,7 @@ const userRoutes = require('./routes/user.routes');
 const propertyRoutes = require('./routes/property.routes');
 const serviceRoutes = require('./routes/service.routes');
 const favoritesRoutes = require('./routes/favorites.routes');
+const { noStore } = require('./middleware/cache-control.middleware');
 const path = require('path');
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -35,6 +36,8 @@ const corsOptions = {
 app.disable('x-powered-by');
 app.use(cors(corsOptions));
 app.use(express.json({ limit: '10kb' }));
+// Política de caché por defecto de la API; las consultas públicas la sustituyen en sus rutas.
+app.use('/api', noStore);
 app.use('/api/properties', propertyRoutes);
 app.use('/api/services', serviceRoutes);
 

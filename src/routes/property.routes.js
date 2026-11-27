@@ -1,4 +1,5 @@
 const express = require('express');
+const { publicRevalidate } = require('../middleware/cache-control.middleware');
 
 const {
   requestEstimation,
@@ -60,7 +61,7 @@ const router = express.Router();
 /**
  * HU-010: catálogo público. No requiere sesión.
  */
-router.get('/', listPublicProperties);
+router.get('/', publicRevalidate, listPublicProperties);
 
 /**
  * HU-004
@@ -113,7 +114,7 @@ router.get(
  * Debe ir después de /mine y /nearby-place-categories
  * para que esas rutas no se interpreten como un :id.
  */
-router.get('/:id', getPublicProperty);
+router.get('/:id', publicRevalidate, getPublicProperty);
 
 /**
  * HU-013
